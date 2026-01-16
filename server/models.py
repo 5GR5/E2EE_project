@@ -32,6 +32,7 @@ class Device(Base):
     user: Mapped["User"] = relationship(back_populates="devices")
     signed_prekeys: Mapped[list["SignedPreKey"]] = relationship(back_populates="device", cascade="all, delete-orphan")
     one_time_prekeys: Mapped[list["OneTimePreKey"]] = relationship(back_populates="device", cascade="all, delete-orphan")
+    identity_signing_public: Mapped[str] = mapped_column(Text)  # Ed25519 pub (base64)
 
 # signed prekey definitions
 class SignedPreKey(Base):

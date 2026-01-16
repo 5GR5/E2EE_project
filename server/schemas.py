@@ -18,6 +18,7 @@ class TokenOut(BaseModel):
 class DeviceCreateIn(BaseModel):
     device_name: str
     identity_key_public: str
+    identity_signing_public: str          # Ed25519 pub  
 
 # Device output
 class DeviceOut(BaseModel):
