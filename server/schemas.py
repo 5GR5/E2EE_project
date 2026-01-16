@@ -45,5 +45,6 @@ class PreKeyBundleOut(BaseModel):
     user_id: UUID
     device_id: UUID
     identity_key_public: str
+    identity_signing_public: str         
     signed_prekey: SignedPreKeyIn
-    one_time_prekey: Optional[OneTimePreKeyIn] = None  # can be null if depleted
+    one_time_prekey: Optional[OneTimePreKeyIn] = None

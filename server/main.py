@@ -142,6 +142,7 @@ async def get_prekey_bundle(
         user_id=target_user_id,
         device_id=device.id,
         identity_key_public=device.identity_key_public,
+        identity_signing_public=device.identity_signing_public,
         signed_prekey=SignedPreKeyIn(key_id=spk.key_id, public_key=spk.public_key, signature=spk.signature),
         one_time_prekey=OneTimePreKeyIn(key_id=opk.key_id, public_key=opk.public_key) if opk else None,
     )
