@@ -1,6 +1,7 @@
 import json
 from uuid import UUID
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, Query
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import get_session
@@ -20,6 +21,15 @@ from .crud import (
 from .ws import presence
 
 app = FastAPI(title="Secure IM Server (Signal-style infra)")
+
+# ---- CORS ----
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:5175"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ---- AUTH ----
 
