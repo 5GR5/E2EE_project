@@ -62,7 +62,12 @@ async def create_device(
     user_id: str = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_session),
 ):
-    device = Device(user_id=UUID(user_id), device_name=data.device_name, identity_key_public=data.identity_key_public)
+    device = Device(
+        user_id=UUID(user_id),
+        device_name=data.device_name,
+        identity_key_public=data.identity_key_public,
+        identity_signing_public=data.identity_signing_public,
+    )
     session.add(device)
     await session.commit()
     return DeviceOut(id=device.id, device_name=device.device_name)
