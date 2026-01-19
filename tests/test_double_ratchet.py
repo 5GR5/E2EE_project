@@ -152,8 +152,8 @@ class TestDoubleRatchetState:
         assert state.dhs_priv_b64 is not None
         assert state.dhs_pub_b64 is not None
         assert state.dhr_pub_b64 is None  # Not set yet
-        assert state.cks_b64 is not None  # Initialized with root key
-        assert state.ckr_b64 is None  # Will be set on first receive
+        assert state.cks_b64 is None  # Derived lazily on first encrypt
+        assert state.ckr_b64 is None  # Derived on first receive
         assert state.ns == 0
         assert state.nr == 0
         assert state.pn == 0

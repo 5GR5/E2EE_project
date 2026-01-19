@@ -244,6 +244,11 @@ class DoubleRatchetState:
         """
         Initialize a Double Ratchet state from X3DH shared secret.
         
+        RK starts as the X3DH shared secret (32 bytes).
+        CKs and CKr are None initially and will be derived via kdf_rk:
+        - CKs: derived on first encrypt (lazily from RK via DH with peer's DH public)
+        - CKr: derived on first decrypt (from peer's ephemeral DH public in header)
+        
         Args:
             root_key: 32-byte shared secret from X3DH
             
@@ -256,9 +261,9 @@ class DoubleRatchetState:
             rk_b64=b64e(root_key),
             dhs_priv_b64=x25519_priv_to_b64(dhs_priv),
             dhs_pub_b64=x25519_pub_to_b64(dhs_pub),
-            dhr_pub_b64=None,  # Not known yet
-            cks_b64=b64e(root_key),  # Initialize with root key
-            ckr_b64=None,  # Will be set on first receive
+            dhr_pub_b64=None,  # Not known until first message
+            cks_b64=None,      # Derived on first encrypt
+            ckr_b64=None,      # Derived on first decrypt
             ns=0,
             nr=0,
             pn=0,
@@ -295,10 +300,18 @@ def encrypt(
     Returns:
         Tuple of (MessageHeader, ciphertext_b64)
     """
-    # Step 1: Derive new sending chain key and message key
+    # Step 1: Initialize CKs on first encrypt if needed (derive from RK)
     if state.cks_b64 is None:
-        raise ValueError("CKs not initialized. Cannot encrypt.")
+        # First message - derive CKs from RK using a DH step
+        # We use DH with an empty/zero DHr for initial derivation
+        # (In practice, both parties do the same DH with their own ephemeral keys)
+        rk_bytes = b64d(state.rk_b64)
+        zero_dh = b'\x00' * 32  # Placeholder for no peer DH yet
+        rk_new_bytes, cks_bytes = kdf_rk(rk_bytes, zero_dh)
+        state.rk_b64 = b64e(rk_new_bytes)
+        state.cks_b64 = b64e(cks_bytes)
     
+    # Step 1b: Derive new sending chain key and message key
     cks_bytes = b64d(state.cks_b64)
     cks_new_bytes, mk_bytes = kdf_ck(cks_bytes)
     state.cks_b64 = b64e(cks_new_bytes)
@@ -386,8 +399,26 @@ def decrypt(
     # Bob should just use the initial RK to derive CKr
     
     if state.ckr_b64 is None:
-        # First message from sender - initialize CKr from RK if we haven't yet
-        state.ckr_b64 = state.rk_b64  # Use same root key as sender
+        # First message from this sender - initialize CKr
+        # If this is the very first ratchet (state.dhr_pub_b64 is None), we haven't done any DH ratchet yet
+        # On the first message, both parties should use symmetric initialization (same zero_dh)
+        if state.dhr_pub_b64 is None:
+            # First message ever - use zero_dh like the sender did
+            rk_bytes = b64d(state.rk_b64)
+            zero_dh = b'\x00' * 32
+            rk_new_bytes, ckr_new_bytes = kdf_rk(rk_bytes, zero_dh)
+            state.rk_b64 = b64e(rk_new_bytes)
+            state.ckr_b64 = b64e(ckr_new_bytes)
+        else:
+            # We've seen messages before but not from this sender yet (new DH ratchet) - do DH
+            dhs_priv = x25519_priv_from_b64(state.dhs_priv_b64)
+            dhr_pub = x25519_pub_from_b64(header.dh_pub)
+            dh_out = dh(dhs_priv, dhr_pub)
+            rk_bytes = b64d(state.rk_b64)
+            rk_new_bytes, ckr_new_bytes = kdf_rk(rk_bytes, dh_out)
+            state.rk_b64 = b64e(rk_new_bytes)
+            state.ckr_b64 = b64e(ckr_new_bytes)
+        
         state.dhr_pub_b64 = header.dh_pub
         state.nr = 0
     
