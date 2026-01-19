@@ -406,20 +406,30 @@ def decrypt(
                     del state.skipped[oldest_key]
                 state.skipped[(state.dhr_pub_b64, state.nr + i)] = b64e(mk_bytes)
         
-        # Perform DH ratchet
+        # Perform two-step DH ratchet
         dhs_priv = x25519_priv_from_b64(state.dhs_priv_b64)
         dhr_pub = x25519_pub_from_b64(header.dh_pub)
         
-        dh_out = dh(dhs_priv, dhr_pub)
+        # Step 1: DH(our_current_DHs, their_new_DHr) → RK, CKr
+        dh_out_1 = dh(dhs_priv, dhr_pub)
         rk_bytes = b64d(state.rk_b64)
-        rk_new_bytes, ckr_new_bytes = kdf_rk(rk_bytes, dh_out)
+        rk_new_bytes, ckr_new_bytes = kdf_rk(rk_bytes, dh_out_1)
         
-        # Update state (RK and CKr, not CKs)
-        state.rk_b64 = b64e(rk_new_bytes)
+        # Step 2: Generate new DHs keypair and DH(new_DHs, their_new_DHr) → RK, CKs
+        dhs_priv_new, dhs_pub_new = x25519_keypair()
+        dh_out_2 = dh(dhs_priv_new, dhr_pub)
+        rk_new2_bytes, cks_new_bytes = kdf_rk(rk_new_bytes, dh_out_2)
+        
+        # Update state with both new CKr and CKs
+        state.rk_b64 = b64e(rk_new2_bytes)
+        state.dhs_priv_b64 = x25519_priv_to_b64(dhs_priv_new)
+        state.dhs_pub_b64 = x25519_pub_to_b64(dhs_pub_new)
         state.dhr_pub_b64 = header.dh_pub
         state.ckr_b64 = b64e(ckr_new_bytes)
+        state.cks_b64 = b64e(cks_new_bytes)
         state.nr = 0
         state.pn = state.ns
+        state.ns = 0
     
     # Step 3: Skip keys in CKr up to header.n
     ckr_bytes = b64d(state.ckr_b64)
