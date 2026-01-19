@@ -33,6 +33,17 @@ def x25519_pub_to_b64(pub: x25519.X25519PublicKey) -> str:
 def x25519_pub_from_b64(s: str) -> x25519.X25519PublicKey:
     return x25519.X25519PublicKey.from_public_bytes(b64d(s))
 
+def x25519_priv_to_b64(priv: x25519.X25519PrivateKey) -> str:
+    raw = priv.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption()
+    )
+    return b64e(raw)
+
+def x25519_priv_from_b64(s: str) -> x25519.X25519PrivateKey:
+    return x25519.X25519PrivateKey.from_private_bytes(b64d(s))
+
 def ed25519_pub_to_b64(pub: ed25519.Ed25519PublicKey) -> str:
     raw = pub.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
     return b64e(raw)
