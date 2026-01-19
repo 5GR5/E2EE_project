@@ -51,6 +51,14 @@ function App() {
     }
   }
 
+  const handleLogout = () => {
+    setToken(null)
+    setUsername('')
+    setPassword('')
+    setMessages([])
+    setScreen('auth')
+  }
+
   const handleSendMessage = () => {
     if (inputMessage.trim()) {
       setMessages([...messages, { text: inputMessage, type: 'sent' }])
@@ -76,8 +84,8 @@ function App() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
-          <button onClick={handleRegister}>Register</button>
-          <button onClick={() => setScreen('login')}>Already have account? Login</button>
+          <button className="primary" onClick={handleRegister} disabled={!username || !password}>Register</button>
+          <button className="secondary" onClick={() => setScreen('login')}>Already have account? Login</button>
         </div>
       )}
 
@@ -96,14 +104,21 @@ function App() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
-          <button onClick={handleLogin}>Login</button>
-          <button onClick={() => setScreen('auth')}>Back to Register</button>
+          <button className="primary" onClick={handleLogin} disabled={!username || !password}>Login</button>
+          <button className="secondary" onClick={() => setScreen('auth')}>Back to Register</button>
         </div>
       )}
 
       {screen === 'chat' && (
         <div className="chat-container">
-          <h1>Chat</h1>
+          <div className="chat-header">
+            <h1>Chat</h1>
+            <div style={{display:'flex', gap: '1rem', alignItems:'center'}}>
+              <div className="meta">{username}</div>
+              {token && <div className="small-muted">{token.slice(0,16)}…</div>}
+              <button className="secondary" onClick={handleLogout}>Logout</button>
+            </div>
+          </div>
           <div className="messages">
             {messages.map((msg, idx) => (
               <div key={idx} className={`message ${msg.type}`}>
@@ -119,7 +134,7 @@ function App() {
               onChange={(e) => setInputMessage(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
             />
-            <button onClick={handleSendMessage}>Send</button>
+            <button onClick={handleSendMessage} disabled={!inputMessage.trim()}>Send</button>
           </div>
         </div>
       )}
