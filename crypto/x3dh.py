@@ -21,8 +21,10 @@ from cryptography.hazmat.primitives.asymmetric import x25519
 from .primitive import (
     b64e, b64d,
     x25519_pub_to_b64, x25519_pub_from_b64,
-    x25519_priv_from_b64,
     dh, hkdf_sha256
+)
+from .keys import (
+    x25519_priv_from_b64,
 )
 
 

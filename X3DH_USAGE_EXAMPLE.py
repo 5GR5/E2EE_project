@@ -7,6 +7,8 @@ Quick reference for how to use X3DH in your application.
 from crypto.primitive import (
     x25519_keypair,
     x25519_pub_to_b64,
+)
+from crypto.keys import (
     x25519_priv_to_b64,
 )
 from crypto.x3dh import alice_initiate, bob_respond, InitialMessageHeader

@@ -4,7 +4,7 @@ from typing import Dict, List, Tuple
 from cryptography.hazmat.primitives.asymmetric import x25519, ed25519
 from cryptography.hazmat.primitives import serialization
 
-from .primitives import (
+from .primitive import (
     b64e, b64d,
     x25519_keypair, ed25519_keypair,
     x25519_pub_to_b64, ed25519_pub_to_b64,

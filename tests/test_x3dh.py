@@ -19,6 +19,8 @@ import pytest
 from crypto.primitive import (
     x25519_keypair,
     x25519_pub_to_b64, x25519_pub_from_b64,
+)
+from crypto.keys import (
     x25519_priv_to_b64, x25519_priv_from_b64,
 )
 from crypto.x3dh import (

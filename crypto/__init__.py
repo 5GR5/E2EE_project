@@ -8,8 +8,6 @@ from .primitive import (
     ed25519_keypair,
     x25519_pub_to_b64,
     x25519_pub_from_b64,
-    x25519_priv_to_b64,
-    x25519_priv_from_b64,
     ed25519_pub_to_b64,
     ed25519_pub_from_b64,
     dh,
@@ -20,6 +18,13 @@ from .primitive import (
     verify_ed25519,
 )
 
+from .keys import (
+    x25519_priv_to_b64,
+    x25519_priv_from_b64,
+    ed25519_priv_to_b64,
+    ed25519_priv_from_b64,
+)
+
 from .x3dh import (
     InitialMessageHeader,
     alice_initiate,
@@ -27,7 +32,7 @@ from .x3dh import (
 )
 
 __all__ = [
-    # Primitives
+    # Primitives (public key only)
     "b64e",
     "b64d",
     "rand_nonce",
@@ -35,8 +40,6 @@ __all__ = [
     "ed25519_keypair",
     "x25519_pub_to_b64",
     "x25519_pub_from_b64",
-    "x25519_priv_to_b64",
-    "x25519_priv_from_b64",
     "ed25519_pub_to_b64",
     "ed25519_pub_from_b64",
     "dh",
@@ -45,6 +48,11 @@ __all__ = [
     "aead_decrypt",
     "sign_ed25519",
     "verify_ed25519",
+    # Private key operations (from keys.py)
+    "x25519_priv_to_b64",
+    "x25519_priv_from_b64",
+    "ed25519_priv_to_b64",
+    "ed25519_priv_from_b64",
     # X3DH
     "InitialMessageHeader",
     "alice_initiate",
