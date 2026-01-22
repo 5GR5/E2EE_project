@@ -1,143 +1,189 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { Auth } from './components/Auth'
+import { ChatList } from './components/ChatList'
+import { ChatWindow } from './components/ChatWindow'
+import { MessageInput } from './components/MessageInput'
+import { api } from './services/api'
+import { storage } from './services/storage'
 import './App.css'
 
-function App() {
-  const [screen, setScreen] = useState('auth') // 'auth', 'login', 'chat'
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [token, setToken] = useState(null)
-  const [messages, setMessages] = useState([])
-  const [inputMessage, setInputMessage] = useState('')
-
-  const API_URL = 'http://localhost:8000'
-
-  const handleRegister = async () => {
-    try {
-      const res = await fetch(`${API_URL}/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      })
-      const data = await res.json()
-      if (res.ok && data.access_token) {
-        setToken(data.access_token)
-        setScreen('chat')
-        setMessages([{ text: `Welcome ${username}!`, type: 'system' }])
-      } else {
-        alert('Registration failed: ' + (data.detail || 'Unknown error'))
-      }
-    } catch (err) {
-      alert('Registration failed: ' + err.message)
-    }
+// Helper function to check if JWT token is expired
+function isTokenExpired(token) {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    const expirationTime = payload.exp * 1000 // Convert to milliseconds
+    return Date.now() >= expirationTime
+  } catch {
+    return true // If we can't parse it, consider it expired
   }
+}
 
-  const handleLogin = async () => {
-    try {
-      const res = await fetch(`${API_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      })
-      const data = await res.json()
-      if (res.ok && data.access_token) {
-        setToken(data.access_token)
-        setScreen('chat')
-        setMessages([{ text: `Welcome back ${username}!`, type: 'system' }])
+function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [currentUser, setCurrentUser] = useState('')
+  const [token, setToken] = useState(null)
+  const [currentUserId, setCurrentUserId] = useState(null)
+  const [users, setUsers] = useState([])
+  const [selectedUser, setSelectedUser] = useState(null)
+  const [messages, setMessages] = useState({})
+
+  // Load saved auth on mount
+  useEffect(() => {
+    const savedAuth = storage.getAuth()
+    if (savedAuth.token && savedAuth.username) {
+      // Check if token is expired
+      if (isTokenExpired(savedAuth.token)) {
+        storage.clear()
       } else {
-        alert('Login failed: ' + (data.detail || 'Unknown error'))
+        setToken(savedAuth.token)
+        setCurrentUser(savedAuth.username)
+        setIsAuthenticated(true)
       }
+    }
+  }, [])
+
+  // Fetch real users from server
+  useEffect(() => {
+    if (isAuthenticated && token) {
+      const fetchUsers = async () => {
+        try {
+          const usersList = await api.getUsers(token)
+          setUsers(usersList.map(u => ({
+            ...u,
+            lastMessage: '',
+            unread: 0
+          })))
+        } catch (err) {
+          console.error('Failed to fetch users:', err)
+          // If 401 Unauthorized, token is invalid - log out
+          if (err.message.includes('401') || err.message.includes('Unauthorized')) {
+            handleLogout()
+          }
+        }
+      }
+      fetchUsers()
+
+      // Refresh users list every 5 seconds to see new registrations
+      const interval = setInterval(fetchUsers, 5000)
+      return () => clearInterval(interval)
+    }
+  }, [isAuthenticated, token])
+
+  // Poll for messages with selected user
+  useEffect(() => {
+    if (isAuthenticated && token && selectedUser) {
+      const fetchMessages = async () => {
+        try {
+          const msgs = await api.getMessages(token, selectedUser.id)
+          setMessages(prev => ({
+            ...prev,
+            [selectedUser.id]: msgs.map(m => ({
+              from: m.from_user_id,
+              to: m.to_user_id,
+              text: m.text,
+              timestamp: m.created_at
+            }))
+          }))
+        } catch (err) {
+          console.error('Failed to fetch messages:', err)
+        }
+      }
+      
+      fetchMessages()
+      // Poll every 2 seconds for new messages
+      const interval = setInterval(fetchMessages, 2000)
+      return () => clearInterval(interval)
+    }
+  }, [isAuthenticated, token, selectedUser])
+
+  const handleLogin = async (username, password, isLogin) => {
+    try {
+      let authData
+      if (isLogin) {
+        authData = await api.login(username, password)
+      } else {
+        authData = await api.register(username, password)
+      }
+
+      setToken(authData.access_token)
+      setCurrentUser(username)
+      setIsAuthenticated(true)
+
+      // Decode JWT to get user ID
+      const payload = JSON.parse(atob(authData.access_token.split('.')[1]))
+      setCurrentUserId(payload.sub)
+
+      // Save to localStorage
+      storage.saveAuth(authData.access_token, username, payload.sub)
     } catch (err) {
-      alert('Login failed: ' + err.message)
+      throw err
     }
   }
 
   const handleLogout = () => {
+    storage.clear()
+    setIsAuthenticated(false)
+    setCurrentUser('')
     setToken(null)
-    setUsername('')
-    setPassword('')
-    setMessages([])
-    setScreen('auth')
+    setCurrentUserId(null)
+    setUsers([])
+    setSelectedUser(null)
+    setMessages({})
   }
 
-  const handleSendMessage = () => {
-    if (inputMessage.trim()) {
-      setMessages([...messages, { text: inputMessage, type: 'sent' }])
-      setInputMessage('')
-      // TODO: Send via WebSocket
+  const handleSelectUser = (user) => {
+    setSelectedUser(user)
+  }
+
+  const handleSendMessage = async (text) => {
+    if (!selectedUser || !token) return
+
+    try {
+      await api.sendMessage(token, selectedUser.id, text)
+      
+      // Optimistically add message to UI
+      const newMessage = {
+        from: currentUserId,
+        to: selectedUser.id,
+        text,
+        timestamp: new Date().toISOString()
+      }
+      
+      setMessages(prev => ({
+        ...prev,
+        [selectedUser.id]: [...(prev[selectedUser.id] || []), newMessage]
+      }))
+    } catch (err) {
+      console.error('Failed to send message:', err)
     }
   }
 
+  if (!isAuthenticated) {
+    return <Auth onLogin={handleLogin} />
+  }
+
   return (
-    <div className="app-container">
-      {screen === 'auth' && (
-        <div className="auth-container">
-          <h1>E2EE Messaging</h1>
-          <input
-            type="text"
-            placeholder="Username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          <button className="primary" onClick={handleRegister} disabled={!username || !password}>Register</button>
-          <button className="secondary" onClick={() => setScreen('login')}>Already have account? Login</button>
-        </div>
-      )}
+    <div className="app">
+      <ChatList
+        users={users}
+        currentUser={currentUser}
+        selectedUser={selectedUser}
+        onSelectUser={handleSelectUser}
+        onLogout={handleLogout}
+      />
 
-      {screen === 'login' && (
-        <div className="auth-container">
-          <h1>E2EE Messaging - Login</h1>
-          <input
-            type="text"
-            placeholder="Username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          <button className="primary" onClick={handleLogin} disabled={!username || !password}>Login</button>
-          <button className="secondary" onClick={() => setScreen('auth')}>Back to Register</button>
-        </div>
-      )}
-
-      {screen === 'chat' && (
-        <div className="chat-container">
-          <div className="chat-header">
-            <h1>Chat</h1>
-            <div style={{display:'flex', gap: '1rem', alignItems:'center'}}>
-              <div className="meta">{username}</div>
-              {token && <div className="small-muted">{token.slice(0,16)}…</div>}
-              <button className="secondary" onClick={handleLogout}>Logout</button>
-            </div>
-          </div>
-          <div className="messages">
-            {messages.map((msg, idx) => (
-              <div key={idx} className={`message ${msg.type}`}>
-                {msg.text}
-              </div>
-            ))}
-          </div>
-          <div className="input-area">
-            <input
-              type="text"
-              placeholder="Type a message..."
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-            />
-            <button onClick={handleSendMessage} disabled={!inputMessage.trim()}>Send</button>
-          </div>
-        </div>
-      )}
+      <div className="chat-main">
+        <ChatWindow
+          selectedUser={selectedUser}
+          messages={messages[selectedUser?.id] || []}
+          currentUser={currentUser}
+          currentUserId={currentUserId}
+        />
+        <MessageInput
+          onSend={handleSendMessage}
+          disabled={!selectedUser}
+        />
+      </div>
     </div>
   )
 }

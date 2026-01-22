@@ -1,6 +1,7 @@
 import asyncio
 from server.db import engine
 from server.models import Base
+from server.simple_messages import SimpleMessage  # Import to register table
 
 async def init_db():
     async with engine.begin() as conn:

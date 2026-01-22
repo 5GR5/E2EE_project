@@ -3,7 +3,7 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import User, Device, SignedPreKey, OneTimePreKey, Message
+from models import User, Device, SignedPreKey, OneTimePreKey, Message
 
 # ---- helpers for CRUD operations ----
 

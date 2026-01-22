@@ -4,21 +4,21 @@ from fastapi import FastAPI, Depends, HTTPException, WebSocket, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .db import get_session
-from .models import Base, User, Device, SignedPreKey, OneTimePreKey
-from .auth import hash_password, verify_password, create_access_token, get_current_user_id
-from .schemas import (
+from db import get_session
+from models import Base, User, Device, SignedPreKey, OneTimePreKey
+from auth import hash_password, verify_password, create_access_token, get_current_user_id
+from schemas import (
     RegisterIn, LoginIn, TokenOut,
     DeviceCreateIn, DeviceOut,
     KeysUploadIn, PreKeyBundleOut, SignedPreKeyIn, OneTimePreKeyIn
 )
-from .crud import (
+from crud import (
     get_user_by_username, get_device,
     get_active_signed_prekey, consume_one_time_prekey,
     create_message, get_undelivered_messages,
     mark_delivered, mark_read
 )
-from .ws import presence
+from ws import presence
 
 app = FastAPI(title="Secure IM Server (Signal-style infra)")
 
@@ -53,6 +53,68 @@ async def login(data: LoginIn, session: AsyncSession = Depends(get_session)):
         raise HTTPException(401, "Bad credentials")
     token = create_access_token(str(user.id))
     return TokenOut(access_token=token)
+
+@app.get("/users")
+async def get_users(
+    user_id: str = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session)
+):
+    """Get all users except the current user"""
+    from sqlalchemy import select
+    result = await session.execute(select(User))
+    all_users = result.scalars().all()
+    # Return all users except current user
+    return [
+        {"id": str(u.id), "username": u.username}
+        for u in all_users
+        if str(u.id) != user_id
+    ]
+
+# ---- SIMPLE MESSAGES ----
+from simple_messages import create_simple_message, get_messages_between_users
+from pydantic import BaseModel
+
+class SendMessageIn(BaseModel):
+    to_user_id: str
+    text: str
+
+@app.post("/messages/send")
+async def send_message(
+    data: SendMessageIn,
+    user_id: str = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session)
+):
+    """Send a simple message to another user"""
+    msg = await create_simple_message(
+        session,
+        from_user_id=UUID(user_id),
+        to_user_id=UUID(data.to_user_id),
+        text=data.text
+    )
+    return {"id": str(msg.id), "created_at": msg.created_at.isoformat()}
+
+@app.get("/messages/{other_user_id}")
+async def get_messages(
+    other_user_id: str,
+    user_id: str = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session)
+):
+    """Get all messages between current user and another user"""
+    messages = await get_messages_between_users(
+        session,
+        user1_id=UUID(user_id),
+        user2_id=UUID(other_user_id)
+    )
+    return [
+        {
+            "id": str(msg.id),
+            "from_user_id": str(msg.from_user_id),
+            "to_user_id": str(msg.to_user_id),
+            "text": msg.text,
+            "created_at": msg.created_at.isoformat()
+        }
+        for msg in messages
+    ]
 
 # ---- DEVICES ----
 

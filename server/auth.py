@@ -1,25 +1,27 @@
 import os
 import jwt
-from datetime import datetime, timedelta
-from passlib.context import CryptContext
+import hashlib
+from datetime import datetime, timedelta, timezone
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
 
 JWT_SECRET = os.getenv("JWT_SECRET", "dev_secret_change_me")
 JWT_ALG = "HS256"
 JWT_EXPIRE_MIN = int(os.getenv("JWT_EXPIRE_MIN", "60"))
 
+# Simple password hashing for demo/school project
+# For production, use bcrypt or argon2
 def hash_password(p: str) -> str:
-    return pwd_context.hash(p)
+    salt = "e2ee_demo_salt"  # In production, use random salt per user
+    return hashlib.sha256((p + salt).encode()).hexdigest()
 
 def verify_password(p: str, hashed: str) -> bool:
-    return pwd_context.verify(p, hashed)
+    return hash_password(p) == hashed
 
 def create_access_token(user_id: str) -> str:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
         "iat": int(now.timestamp()),
