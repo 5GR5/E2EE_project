@@ -1,8 +1,11 @@
 import json
 from uuid import UUID
-from fastapi import FastAPI, Depends, HTTPException, WebSocket, Query
+from fastapi import FastAPI, Depends, HTTPException, WebSocket, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
+from .database import get_db
+from . import crud
 
 from db import get_session
 from models import Base, User, Device, SignedPreKey, OneTimePreKey
@@ -296,3 +299,14 @@ async def ws_endpoint(
             await ws.close()
         except Exception:
             pass
+        
+@app.get("/users/{user_id}/devices")
+def list_user_devices(user_id: str, db: Session = Depends(get_db)):
+    devices = crud.get_devices_by_user(db, user_id)
+    return {
+        "user_id": user_id,
+        "devices": [
+            {"device_id": d.device_id, "device_name": d.device_name}
+            for d in devices
+        ]
+    }
