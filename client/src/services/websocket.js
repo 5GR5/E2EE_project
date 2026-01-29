@@ -1,6 +1,9 @@
 // WebSocket service for real-time messaging
 
 const WS_URL = 'ws://localhost:8000/ws'
+const API_URL = 'http://localhost:8000'
+
+
 
 class WebSocketService {
   constructor() {
@@ -56,23 +59,54 @@ class WebSocketService {
     }
   }
 
-  sendMessage(toDeviceId, message) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      console.error('WebSocket not connected')
-      return false
-    }
-
-    const payload = {
-      type: 'send',
-      to_device_id: toDeviceId,
-      // For now, send plain text (encryption will be added later)
-      header: { plaintext: true },
-      ciphertext: message
-    }
-
-    this.ws.send(JSON.stringify(payload))
-    return true
+sendMessage(toDeviceId, header, ciphertext) {
+  if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+    throw new Error('WebSocket not connected')
   }
+
+  // Generate a message_id (UUID). Modern browsers support crypto.randomUUID()
+  const messageId = crypto.randomUUID()
+
+  const payload = {
+    type: 'send',
+    to_device_id: toDeviceId,
+    message_id: messageId,
+    header,
+    ciphertext
+  }
+
+  this.ws.send(JSON.stringify(payload))
+  return messageId
+}
+
+sendPlaintext(toDeviceId, text) {
+  const header = { plaintext: true }
+  const ciphertext = text
+  return this.sendMessage(toDeviceId, header, ciphertext)
+}
+
+async sendMessageToUser(toUserId, text) {
+  if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+    throw new Error('WebSocket not connected')
+  }
+  if (!this.token) {
+    throw new Error('Missing token')
+  }
+
+  const { devices } = await listUserDevices(toUserId, this.token)
+  if (!devices || devices.length === 0) {
+    throw new Error('Target user has no devices')
+  }
+
+  for (const dev of devices) {
+    // server returns {device_id: "..."}
+    this.sendPlaintext(dev.device_id, text)
+  }
+
+  return true
+}
+
+
 
   onMessage(handler) {
     this.messageHandlers.push(handler)
@@ -97,3 +131,12 @@ class WebSocketService {
 }
 
 export const wsService = new WebSocketService()
+
+export async function listUserDevices(userId, token) {
+  const res = await fetch(`${API_URL}/users/${userId}/devices`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to fetch user devices");
+  return await res.json(); // { user_id, devices:[{device_id, device_name}] }
+}
+

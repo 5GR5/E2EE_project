@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { wsService } from '/services/Websocket'
 import { Auth } from './components/Auth'
 import { ChatList } from './components/ChatList'
 import { ChatWindow } from './components/ChatWindow'
@@ -23,9 +24,11 @@ function App() {
   const [currentUser, setCurrentUser] = useState('')
   const [token, setToken] = useState(null)
   const [currentUserId, setCurrentUserId] = useState(null)
+  const [deviceId, setDeviceId] = useState(null)
   const [users, setUsers] = useState([])
   const [selectedUser, setSelectedUser] = useState(null)
   const [messages, setMessages] = useState({})
+
 
   // Load saved auth on mount
   useEffect(() => {
@@ -109,6 +112,14 @@ function App() {
       setCurrentUser(username)
       setIsAuthenticated(true)
 
+            // Create/register this browser as a device (temporary keys for now)
+      const createdDevice = await api.createDevice(token, {
+        device_name: 'web',
+        identity_key_public: 'TODO',
+        identity_signing_public: 'TODO'
+      })
+      setDeviceId(createdDevice.id)
+
       // Decode JWT to get user ID
       const payload = JSON.parse(atob(authData.access_token.split('.')[1]))
       setCurrentUserId(payload.sub)
@@ -118,6 +129,13 @@ function App() {
     } catch (err) {
       throw err
     }
+      // Create/register this browser as a device
+      const dev = await api.createDevice(authData.access_token, 'web')
+      setDeviceId(dev.id)
+
+      // Connect websocket now that we have deviceId
+      wsService.connect(authData.access_token, dev.id)
+
   }
 
   const handleLogout = () => {
@@ -129,6 +147,9 @@ function App() {
     setUsers([])
     setSelectedUser(null)
     setMessages({})
+    wsService.disconnect()
+    setDeviceId(null)
+
   }
 
   const handleSelectUser = (user) => {
@@ -139,7 +160,7 @@ function App() {
     if (!selectedUser || !token) return
 
     try {
-      await api.sendMessage(token, selectedUser.id, text)
+      await wsService.sendMessageToUser(selectedUser.id, text)
       
       // Optimistically add message to UI
       const newMessage = {

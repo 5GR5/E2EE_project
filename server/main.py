@@ -1,7 +1,8 @@
 import json
 from uuid import UUID
-from fastapi import FastAPI, Depends, HTTPException, WebSocket, Query, Depends
+from fastapi import FastAPI, Depends, HTTPException, WebSocket, Query
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from .database import get_db
@@ -72,6 +73,26 @@ async def get_users(
         for u in all_users
         if str(u.id) != user_id
     ]
+    
+    
+@app.get("/users/{user_id}/devices")
+async def list_user_devices(
+    user_id: UUID,
+    _caller_user_id: str = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(Device).where(Device.user_id == user_id).order_by(Device.created_at.asc())
+    )
+    devices = result.scalars().all()
+
+    return {
+        "user_id": str(user_id),
+        "devices": [
+            {"device_id": str(d.id), "device_name": d.device_name}
+            for d in devices
+        ],
+    }
 
 # ---- SIMPLE MESSAGES ----
 from simple_messages import create_simple_message, get_messages_between_users
@@ -300,13 +321,3 @@ async def ws_endpoint(
         except Exception:
             pass
         
-@app.get("/users/{user_id}/devices")
-def list_user_devices(user_id: str, db: Session = Depends(get_db)):
-    devices = crud.get_devices_by_user(db, user_id)
-    return {
-        "user_id": user_id,
-        "devices": [
-            {"device_id": d.device_id, "device_name": d.device_name}
-            for d in devices
-        ]
-    }

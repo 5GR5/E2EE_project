@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { wsService } from '../services/websocket'
 
 export function ChatWindow({ selectedUser, messages, currentUser, currentUserId }) {
   const messagesEndRef = useRef(null)
@@ -10,6 +11,26 @@ export function ChatWindow({ selectedUser, messages, currentUser, currentUserId 
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+    const [draft, setDraft] = useState('')
+
+  const handleSend = async () => {
+    const text = draft.trim()
+    if (!text) return
+    if (!selectedUser) return
+
+    try {
+      // fan-out send to all devices of selectedUser
+      await wsService.sendMessageToUser(selectedUser.id, text)
+
+      // optional: you can also optimistically add the message to UI elsewhere
+      setDraft('')
+    } catch (e) {
+      console.error('Send failed:', e)
+      alert('Send failed')
+    }
+  }
+
 
   if (!selectedUser) {
     return (
@@ -57,6 +78,19 @@ export function ChatWindow({ selectedUser, messages, currentUser, currentUserId 
         )}
         <div ref={messagesEndRef} />
       </div>
+            <div className="chat-window-input">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Type a message..."
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleSend()
+          }}
+        />
+        <button onClick={handleSend}>Send</button>
+      </div>
     </div>
   )
 }
+
+

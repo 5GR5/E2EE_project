@@ -1,4 +1,6 @@
 // API service for HTTP calls to the server
+import { wsService } from '/services/Websocket'
+
 
 const API_URL = 'http://localhost:8000'
 
@@ -35,26 +37,28 @@ export const api = {
   },
 
   // Device management
-  async createDevice(token, identityKeyPublic, identitySigningPublic) {
-    const res = await fetch(`${API_URL}/devices`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        identity_key_public: identityKeyPublic || 'placeholder_identity_key',
-        identity_signing_public: identitySigningPublic || 'placeholder_signing_key'
-      })
+async createDevice(token, deviceName, identityKeyPublic, identitySigningPublic) {
+  const res = await fetch(`${API_URL}/devices`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      device_name: deviceName || 'web',
+      identity_key_public: identityKeyPublic || 'placeholder_identity_key',
+      identity_signing_public: identitySigningPublic || 'placeholder_signing_key'
     })
+  })
 
-    if (!res.ok) {
-      const error = await res.json()
-      throw new Error(error.detail || 'Device creation failed')
-    }
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
+    throw new Error(error.detail || 'Device creation failed')
+  }
 
-    return res.json() // { id, user_id, ... }
-  },
+  return res.json() // { id, device_name }
+},
+
 
   // Keys (for future E2EE integration)
   async uploadKeys(token, deviceId, signedPreKey, oneTimePreKeys) {
