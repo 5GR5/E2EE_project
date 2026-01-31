@@ -1,5 +1,5 @@
 // API service for HTTP calls to the server
-import { wsService } from '/services/Websocket'
+import { wsService } from './websocket'
 
 
 const API_URL = 'http://localhost:8000'
@@ -37,18 +37,14 @@ export const api = {
   },
 
   // Device management
-async createDevice(token, deviceName, identityKeyPublic, identitySigningPublic) {
+async createDevice(token, deviceData) {
   const res = await fetch(`${API_URL}/devices`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`
     },
-    body: JSON.stringify({
-      device_name: deviceName || 'web',
-      identity_key_public: identityKeyPublic || 'placeholder_identity_key',
-      identity_signing_public: identitySigningPublic || 'placeholder_signing_key'
-    })
+    body: JSON.stringify(deviceData)
   })
 
   if (!res.ok) {

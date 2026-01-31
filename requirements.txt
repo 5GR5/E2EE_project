@@ -1,0 +1,49 @@
+# E2EE Instant Messaging - Python Requirements
+# ============================================
+#
+# This file contains all Python dependencies for the backend server.
+# Install with: pip install -r requirements.txt
+#
+# For client (JavaScript) dependencies, see client/package.json
+
+# ---- Web Framework ----
+# FastAPI: Modern async web framework for building APIs
+fastapi==0.115.0
+
+# Uvicorn: ASGI server for running FastAPI
+uvicorn[standard]==0.30.6
+
+# ---- Database ----
+# SQLAlchemy: SQL toolkit and ORM for Python
+SQLAlchemy==2.0.32
+
+# aiosqlite: Async SQLite support for SQLAlchemy
+aiosqlite==0.19.0
+
+# Alembic: Database migration tool (optional, for schema changes)
+alembic==1.13.2
+
+# ---- Authentication & Security ----
+# PyJWT: JSON Web Token implementation
+PyJWT==2.9.0
+
+# Passlib: Password hashing library (bcrypt backend)
+passlib[bcrypt]==1.7.4
+
+# ---- Data Validation ----
+# Pydantic: Data validation using Python type annotations
+pydantic==2.8.2
+
+# ---- Configuration ----
+# python-dotenv: Load environment variables from .env file
+python-dotenv==1.0.1
+
+# ---- Optional: Testing ----
+# pytest: Testing framework (uncomment if running tests)
+# pytest==7.4.0
+# pytest-asyncio==0.21.0
+
+# ---- Optional: Cryptography (for Python crypto module) ----
+# cryptography: Low-level crypto primitives
+# Note: Client-side crypto uses TweetNaCl (JavaScript), not this
+# cryptography==41.0.0

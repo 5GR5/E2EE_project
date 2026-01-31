@@ -1,3 +1,19 @@
+"""
+E2EE Instant Messaging Server
+
+FastAPI application implementing a secure instant messaging server with end-to-end
+encryption (E2EE) using Signal Protocol (X3DH + Double Ratchet).
+
+Features:
+- User authentication (JWT)
+- Multi-device support
+- Cryptographic key exchange (prekey bundles)
+- WebSocket real-time messaging
+- Message persistence and offline delivery
+
+Security: Server never sees plaintext messages (true E2EE).
+"""
+
 import json
 from uuid import UUID
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, Query
@@ -5,8 +21,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from .database import get_db
-from . import crud
 
 from db import get_session
 from models import Base, User, Device, SignedPreKey, OneTimePreKey
@@ -39,6 +53,19 @@ app.add_middleware(
 
 @app.post("/auth/register", response_model=TokenOut)
 async def register(data: RegisterIn, session: AsyncSession = Depends(get_session)):
+    """
+    Register a new user account.
+
+    Args:
+        data: Registration data (username, password)
+        session: Database session
+
+    Returns:
+        TokenOut: JWT access token
+
+    Raises:
+        HTTPException 409: Username already exists
+    """
     existing = await get_user_by_username(session, data.username)
     if existing:
         raise HTTPException(409, "Username already exists")
@@ -52,6 +79,19 @@ async def register(data: RegisterIn, session: AsyncSession = Depends(get_session
 
 @app.post("/auth/login", response_model=TokenOut)
 async def login(data: LoginIn, session: AsyncSession = Depends(get_session)):
+    """
+    Authenticate user and return JWT token.
+
+    Args:
+        data: Login credentials (username, password)
+        session: Database session
+
+    Returns:
+        TokenOut: JWT access token
+
+    Raises:
+        HTTPException 401: Invalid credentials
+    """
     user = await get_user_by_username(session, data.username)
     if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(401, "Bad credentials")
@@ -81,6 +121,20 @@ async def list_user_devices(
     _caller_user_id: str = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_session),
 ):
+    """
+    List all devices for a specific user.
+
+    Required for multi-device support - clients need to encrypt messages
+    separately for each of the recipient's devices.
+
+    Args:
+        user_id: Target user's UUID
+        _caller_user_id: Authenticated caller's ID (from JWT)
+        session: Database session
+
+    Returns:
+        dict: User ID and list of their devices with public keys
+    """
     result = await session.execute(
         select(Device).where(Device.user_id == user_id).order_by(Device.created_at.asc())
     )
@@ -89,7 +143,13 @@ async def list_user_devices(
     return {
         "user_id": str(user_id),
         "devices": [
-            {"device_id": str(d.id), "device_name": d.device_name}
+            {
+                "device_id": str(d.id),
+                "id": str(d.id),  # Also include 'id' field for compatibility
+                "device_name": d.device_name,
+                "identity_key_public": d.identity_key_public,
+                "identity_signing_public": d.identity_signing_public
+            }
             for d in devices
         ],
     }
@@ -201,38 +261,71 @@ async def get_prekey_bundle(
     session: AsyncSession = Depends(get_session),
     _caller_user_id: str = Depends(get_current_user_id),
 ):
-    # choose device:
-    if device_id:
-        device = await get_device(session, device_id)
-        if not device or device.user_id != target_user_id:
-            raise HTTPException(404, "Target device not found")
-    else:
-        # pick newest device (policy)
-        from sqlalchemy import select
-        res = await session.execute(
-            select(Device).where(Device.user_id == target_user_id).order_by(Device.created_at.desc()).limit(1)
-        )
-        device = res.scalar_one_or_none()
-        if not device:
-            raise HTTPException(404, "Target user has no devices")
+    try:
+        print(f"[KEY_BUNDLE] Fetching bundle for user_id={target_user_id}, device_id={device_id}")
 
-    spk = await get_active_signed_prekey(session, device.id)
-    if not spk:
-        raise HTTPException(409, "Target device has no active signed prekey")
+        # choose device:
+        if device_id:
+            print(f"[KEY_BUNDLE] Looking up specific device: {device_id}")
+            device = await get_device(session, device_id)
+            if not device:
+                print(f"[KEY_BUNDLE] Device not found: {device_id}")
+                raise HTTPException(404, "Target device not found")
+            if device.user_id != target_user_id:
+                print(f"[KEY_BUNDLE] Device {device_id} belongs to user {device.user_id}, not {target_user_id}")
+                raise HTTPException(404, "Target device not found")
+        else:
+            # pick newest device (policy)
+            print(f"[KEY_BUNDLE] Looking up newest device for user {target_user_id}")
+            from sqlalchemy import select
+            res = await session.execute(
+                select(Device).where(Device.user_id == target_user_id).order_by(Device.created_at.desc()).limit(1)
+            )
+            device = res.scalar_one_or_none()
+            if not device:
+                print(f"[KEY_BUNDLE] No devices found for user {target_user_id}")
+                raise HTTPException(404, "Target user has no devices")
+            print(f"[KEY_BUNDLE] Found device: {device.id}")
 
-    # Transaction for consuming OPK
-    async with session.begin():
+        print(f"[KEY_BUNDLE] Fetching signed prekey for device {device.id}")
+        spk = await get_active_signed_prekey(session, device.id)
+        if not spk:
+            print(f"[KEY_BUNDLE] No active signed prekey for device {device.id}")
+            raise HTTPException(409, "Target device has no active signed prekey")
+        print(f"[KEY_BUNDLE] Found signed prekey: key_id={spk.key_id}")
+
+        # Consume one-time prekey (session already has transaction from dependency)
+        print(f"[KEY_BUNDLE] Consuming one-time prekey for device {device.id}")
         opk = await consume_one_time_prekey(session, device.id)
+        if opk:
+            print(f"[KEY_BUNDLE] Consumed one-time prekey: key_id={opk.key_id}")
+        else:
+            print(f"[KEY_BUNDLE] No one-time prekeys available")
+        await session.commit()
 
-    bundle = PreKeyBundleOut(
-        user_id=target_user_id,
-        device_id=device.id,
-        identity_key_public=device.identity_key_public,
-        identity_signing_public=device.identity_signing_public,
-        signed_prekey=SignedPreKeyIn(key_id=spk.key_id, public_key=spk.public_key, signature=spk.signature),
-        one_time_prekey=OneTimePreKeyIn(key_id=opk.key_id, public_key=opk.public_key) if opk else None,
-    )
-    return bundle
+        # Return flattened format matching client expectations
+        bundle = PreKeyBundleOut(
+            user_id=target_user_id,
+            device_id=device.id,
+            identity_key_public=device.identity_key_public,
+            identity_signing_public=device.identity_signing_public,
+            # Flatten signed prekey
+            signed_prekey_id=spk.key_id,
+            signed_prekey_public=spk.public_key,
+            signed_prekey_signature=spk.signature,
+            # Flatten one-time prekey (optional)
+            one_time_prekey_id=opk.key_id if opk else None,
+            one_time_prekey_public=opk.public_key if opk else None,
+        )
+        print(f"[KEY_BUNDLE] Successfully built bundle for device {device.id}")
+        return bundle
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[KEY_BUNDLE] Unexpected error: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, f"Internal server error: {str(e)}")
 
 # ---- WEBSOCKET ----
 
@@ -245,7 +338,7 @@ async def ws_endpoint(
 ):
     # Verify token manually (reuse get_current_user_id logic without HTTPBearer)
     import jwt, os
-    from .auth import JWT_SECRET, JWT_ALG
+    from auth import JWT_SECRET, JWT_ALG
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
         user_id = payload["sub"]
@@ -263,12 +356,20 @@ async def ws_endpoint(
     # Flush undelivered
     pending = await get_undelivered_messages(session, device_id)
     for m in pending:
+        # Get sender's user_id and device_name from device
+        sender_device = await get_device(session, m.from_device_id)
         await ws.send_text(json.dumps({
             "type": "deliver",
             "from_device_id": str(m.from_device_id),
+            "from_user_id": str(sender_device.user_id) if sender_device else None,
+            "from_device_name": sender_device.device_name if sender_device else "Unknown Device",
             "message_id": m.message_id,
             "header": m.header,
             "ciphertext": m.ciphertext,
+            "nonce": m.nonce,
+            "ad_length": m.ad_length,
+            "is_initial_message": m.is_initial_message,
+            "x3dh_header": m.x3dh_header,
             "server_ts": m.server_ts.isoformat(),
         }))
 
@@ -277,15 +378,25 @@ async def ws_endpoint(
             raw = await ws.receive_text()
             msg = json.loads(raw)
             mtype = msg.get("type")
+            print(f"[WS] Received message type={mtype} from device={device_id}")
 
             if mtype == "send":
+                print(f"[WS] Processing send message: message_id={msg.get('message_id')}, to_device={msg.get('to_device_id')}")
                 to_device_id = UUID(msg["to_device_id"])
                 message_id = msg["message_id"]
                 header = msg["header"]
                 ciphertext = msg["ciphertext"]
+                # Extract Signal protocol encryption fields
+                nonce = msg.get("nonce")
+                ad_length = msg.get("ad_length")
+                is_initial_message = msg.get("is_initial_message", False)
+                x3dh_header = msg.get("x3dh_header")
 
                 # store
-                await create_message(session, message_id, device_id, to_device_id, header, ciphertext)
+                await create_message(
+                    session, message_id, device_id, to_device_id,
+                    header, ciphertext, nonce, ad_length, is_initial_message, x3dh_header
+                )
                 await session.commit()
 
                 # deliver if online
@@ -294,9 +405,15 @@ async def ws_endpoint(
                     await peer_ws.send_text(json.dumps({
                         "type": "deliver",
                         "from_device_id": str(device_id),
+                        "from_user_id": str(user_id),
+                        "from_device_name": device.device_name,  # Include device name
                         "message_id": message_id,
                         "header": header,
                         "ciphertext": ciphertext,
+                        "nonce": nonce,
+                        "ad_length": ad_length,
+                        "is_initial_message": is_initial_message,
+                        "x3dh_header": x3dh_header,
                         "server_ts": "",  # optional fill after re-read
                     }))
 

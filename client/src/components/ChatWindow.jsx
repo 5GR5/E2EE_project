@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
-import { wsService } from '../services/websocket'
+import { useEffect, useRef } from 'react'
 
 export function ChatWindow({ selectedUser, messages, currentUser, currentUserId }) {
   const messagesEndRef = useRef(null)
@@ -11,25 +10,6 @@ export function ChatWindow({ selectedUser, messages, currentUser, currentUserId 
   useEffect(() => {
     scrollToBottom()
   }, [messages])
-
-    const [draft, setDraft] = useState('')
-
-  const handleSend = async () => {
-    const text = draft.trim()
-    if (!text) return
-    if (!selectedUser) return
-
-    try {
-      // fan-out send to all devices of selectedUser
-      await wsService.sendMessageToUser(selectedUser.id, text)
-
-      // optional: you can also optimistically add the message to UI elsewhere
-      setDraft('')
-    } catch (e) {
-      console.error('Send failed:', e)
-      alert('Send failed')
-    }
-  }
 
 
   if (!selectedUser) {
@@ -50,7 +30,9 @@ export function ChatWindow({ selectedUser, messages, currentUser, currentUserId 
         <div className="user-avatar">{selectedUser.username[0].toUpperCase()}</div>
         <div className="chat-window-header-info">
           <div className="chat-window-name">{selectedUser.username}</div>
-          <div className="chat-window-status">online</div>
+          <div className="chat-window-status">
+            <span className="encryption-badge">🔒 End-to-end encrypted</span>
+          </div>
         </div>
       </div>
 
@@ -68,6 +50,12 @@ export function ChatWindow({ selectedUser, messages, currentUser, currentUserId 
             >
               <div className="message-content">{msg.text}</div>
               <div className="message-time">
+                {msg.from !== currentUserId && msg.fromDeviceName && (
+                  <span className="device-badge" title={`From: ${msg.fromDeviceName}`}>
+                    📱 {msg.fromDeviceName}
+                  </span>
+                )}
+                {' '}
                 {new Date(msg.timestamp).toLocaleTimeString('en-US', {
                   hour: '2-digit',
                   minute: '2-digit'
@@ -77,17 +65,6 @@ export function ChatWindow({ selectedUser, messages, currentUser, currentUserId 
           ))
         )}
         <div ref={messagesEndRef} />
-      </div>
-            <div className="chat-window-input">
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="Type a message..."
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleSend()
-          }}
-        />
-        <button onClick={handleSend}>Send</button>
       </div>
     </div>
   )

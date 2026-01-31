@@ -70,6 +70,11 @@ class Message(Base):
     to_device_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("devices.id"), index=True)
     header: Mapped[dict] = mapped_column(JSON)
     ciphertext: Mapped[str] = mapped_column(Text)
+    # Signal protocol encryption fields
+    nonce: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ad_length: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_initial_message: Mapped[bool] = mapped_column(Boolean, default=False)
+    x3dh_header: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     server_ts: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     delivered_ts: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     read_ts: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

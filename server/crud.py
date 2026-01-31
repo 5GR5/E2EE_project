@@ -2,8 +2,6 @@ from datetime import datetime
 from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from . import models
-
 
 from models import User, Device, SignedPreKey, OneTimePreKey, Message
 
@@ -25,6 +23,10 @@ async def create_message(
     to_device_id: UUID,
     header: dict,
     ciphertext: str,
+    nonce: str | None = None,
+    ad_length: int | None = None,
+    is_initial_message: bool = False,
+    x3dh_header: dict | None = None,
 ):
     msg = Message(
         message_id=message_id,
@@ -32,6 +34,10 @@ async def create_message(
         to_device_id=to_device_id,
         header=header,
         ciphertext=ciphertext,
+        nonce=nonce,
+        ad_length=ad_length,
+        is_initial_message=is_initial_message,
+        x3dh_header=x3dh_header,
     )
     session.add(msg)
     await session.flush()
@@ -75,28 +81,26 @@ async def get_active_signed_prekey(session: AsyncSession, device_id: UUID) -> Si
 async def consume_one_time_prekey(session: AsyncSession, device_id: UUID) -> OneTimePreKey | None:
     """
     Atomically pick one unused OPK and mark consumed.
-    Uses SELECT ... FOR UPDATE SKIP LOCKED to avoid races.
+    SQLite version (doesn't support FOR UPDATE SKIP LOCKED).
     """
+    from sqlalchemy import update
 
-    from sqlalchemy import text
-    row = await session.execute(text("""
-        SELECT id, key_id, public_key
-        FROM one_time_prekeys
-        WHERE device_id = :device_id AND consumed_at IS NULL
-        ORDER BY created_at ASC
-        FOR UPDATE SKIP LOCKED
-        LIMIT 1
-    """), {"device_id": str(device_id)})
-    r = row.first()
-    if not r:
+    # Find first available one-time prekey
+    res = await session.execute(
+        select(OneTimePreKey)
+        .where(OneTimePreKey.device_id == device_id, OneTimePreKey.consumed_at.is_(None))
+        .order_by(OneTimePreKey.created_at.asc())
+        .limit(1)
+    )
+    opk = res.scalar_one_or_none()
+
+    if not opk:
         return None
 
-    await session.execute(
-        text("UPDATE one_time_prekeys SET consumed_at = :ts WHERE id = :id"),
-        {"ts": datetime.utcnow(), "id": str(r.id)}
-    )
-    # return a lightweight object-like dict
-    opk = OneTimePreKey(id=r.id, device_id=device_id, key_id=r.key_id, public_key=r.public_key)
+    # Mark as consumed
+    opk.consumed_at = datetime.utcnow()
+    await session.flush()
+
     return opk
 
 def get_devices_by_user(db, user_id: str):

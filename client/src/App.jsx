@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
-import { wsService } from '/services/Websocket'
+import { wsService } from './services/websocket'
+import { signalProtocol } from './e2ee/signal-protocol'
+import { encodeBase64 } from 'tweetnacl-util'
 import { Auth } from './components/Auth'
 import { ChatList } from './components/ChatList'
 import { ChatWindow } from './components/ChatWindow'
@@ -29,8 +31,34 @@ function App() {
   const [selectedUser, setSelectedUser] = useState(null)
   const [messages, setMessages] = useState({})
 
+  // Setup WebSocket message handler
+  const setupMessageHandler = () => {
+    // Clear any existing handlers to prevent duplicates
+    wsService.removeHandlers()
 
-  // Load saved auth on mount
+    wsService.onMessage((data) => {
+      // Handle both 'message' (after decryption) and 'deliver' types
+      if (data.type === 'message' || data.type === 'deliver') {
+        console.log('[App] Received message:', data)
+        const msg = {
+          from: data.from_user_id,     // Use user ID, not device ID
+          fromDeviceId: data.from_device_id, // Include device ID for display
+          fromDeviceName: data.from_device_name || 'Unknown Device', // Device name
+          text: data.text,             // Use decrypted text, not ciphertext
+          timestamp: data.timestamp || new Date().toISOString()
+        }
+        setMessages(prev => {
+          const senderId = data.from_user_id
+          return {
+            ...prev,
+            [senderId]: [...(prev[senderId] || []), msg]
+          }
+        })
+      }
+    })
+  }
+
+  // Load saved auth and messages on mount
   useEffect(() => {
     const savedAuth = storage.getAuth()
     if (savedAuth.token && savedAuth.username) {
@@ -40,7 +68,20 @@ function App() {
       } else {
         setToken(savedAuth.token)
         setCurrentUser(savedAuth.username)
+        setCurrentUserId(savedAuth.userId)
         setIsAuthenticated(true)
+
+        // Load saved messages from localStorage
+        const savedMessages = storage.getMessages()
+        setMessages(savedMessages)
+
+        // Restore deviceId and reconnect WebSocket if available
+        if (savedAuth.deviceId) {
+          setDeviceId(savedAuth.deviceId)
+          wsService.connect(savedAuth.token, savedAuth.deviceId)
+          // Setup message handler for restored session
+          setupMessageHandler()
+        }
       }
     }
   }, [])
@@ -72,32 +113,9 @@ function App() {
     }
   }, [isAuthenticated, token])
 
-  // Poll for messages with selected user
-  useEffect(() => {
-    if (isAuthenticated && token && selectedUser) {
-      const fetchMessages = async () => {
-        try {
-          const msgs = await api.getMessages(token, selectedUser.id)
-          setMessages(prev => ({
-            ...prev,
-            [selectedUser.id]: msgs.map(m => ({
-              from: m.from_user_id,
-              to: m.to_user_id,
-              text: m.text,
-              timestamp: m.created_at
-            }))
-          }))
-        } catch (err) {
-          console.error('Failed to fetch messages:', err)
-        }
-      }
-      
-      fetchMessages()
-      // Poll every 2 seconds for new messages
-      const interval = setInterval(fetchMessages, 2000)
-      return () => clearInterval(interval)
-    }
-  }, [isAuthenticated, token, selectedUser])
+  // NOTE: Disabled REST API polling since we're using WebSocket for E2EE messages
+  // The /messages endpoint returns plaintext simple messages, not encrypted WebSocket messages
+  // All messages now come through WebSocket in real-time
 
   const handleLogin = async (username, password, isLogin) => {
     try {
@@ -112,30 +130,54 @@ function App() {
       setCurrentUser(username)
       setIsAuthenticated(true)
 
-            // Create/register this browser as a device (temporary keys for now)
-      const createdDevice = await api.createDevice(token, {
-        device_name: 'web',
-        identity_key_public: 'TODO',
-        identity_signing_public: 'TODO'
-      })
-      setDeviceId(createdDevice.id)
-
       // Decode JWT to get user ID
       const payload = JSON.parse(atob(authData.access_token.split('.')[1]))
       setCurrentUserId(payload.sub)
 
-      // Save to localStorage
-      storage.saveAuth(authData.access_token, username, payload.sub)
-    } catch (err) {
-      throw err
-    }
-      // Create/register this browser as a device
-      const dev = await api.createDevice(authData.access_token, 'web')
+      // Initialize Signal Protocol to generate keys
+      const tempDeviceId = `${username}-device-${Date.now()}`
+      await signalProtocol.initialize(tempDeviceId)
+
+      // Get identity key in base64 format
+      const identityPublicKey = encodeBase64(signalProtocol.identityKeyPair.publicKey)
+
+      // Create/register this browser as a device with real keys
+      const dev = await api.createDevice(authData.access_token, {
+        device_name: 'web',
+        identity_key_public: identityPublicKey,
+        identity_signing_public: identityPublicKey  // Use same key for now
+      })
       setDeviceId(dev.id)
+
+      // Upload signed prekey and one-time prekeys to server
+      const keyBundle = signalProtocol.getKeyBundle()
+      await api.uploadKeys(
+        authData.access_token,
+        dev.id,
+        {
+          key_id: keyBundle.signed_prekey_id,
+          public_key: keyBundle.signed_prekey_public,
+          signature: keyBundle.signed_prekey_public  // Using same as public key for simplicity
+        },
+        keyBundle.one_time_prekeys.map(k => ({
+          key_id: k.id,
+          public_key: k.public_key
+        }))
+      )
+      console.log('[App] Keys uploaded to server')
+
+      // Save auth with deviceId and userId to localStorage
+      storage.saveAuth(authData.access_token, username, dev.id, payload.sub)
 
       // Connect websocket now that we have deviceId
       wsService.connect(authData.access_token, dev.id)
 
+      // Listen for incoming messages via WebSocket
+      setupMessageHandler()
+
+    } catch (err) {
+      throw err
+    }
   }
 
   const handleLogout = () => {

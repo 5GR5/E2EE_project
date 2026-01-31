@@ -41,10 +41,16 @@ class KeysUploadIn(BaseModel):
     one_time_prekeys: List[OneTimePreKeyIn] = Field(default_factory=list)
 
 # returned prekey bundle (for other users to fetch)
+# Flattened format to match client expectations
 class PreKeyBundleOut(BaseModel):
     user_id: UUID
     device_id: UUID
     identity_key_public: str
-    identity_signing_public: str         
-    signed_prekey: SignedPreKeyIn
-    one_time_prekey: Optional[OneTimePreKeyIn] = None
+    identity_signing_public: str
+    # Flattened signed prekey fields
+    signed_prekey_id: int
+    signed_prekey_public: str
+    signed_prekey_signature: str
+    # Flattened one-time prekey fields (optional)
+    one_time_prekey_id: Optional[int] = None
+    one_time_prekey_public: Optional[str] = None
