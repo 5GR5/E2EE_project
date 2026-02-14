@@ -418,6 +418,7 @@ class SignalProtocol {
   constructor() {
     this.sessions = new Map() // deviceId -> DoubleRatchetSession
     this.identityKeyPair = null
+    this.identitySigningKeyPair = null
     this.signedPreKey = null
     this.oneTimePreKeys = []
     this.deviceId = null
@@ -444,6 +445,26 @@ class SignalProtocol {
       publicKey: new Uint8Array(storedIdentity.publicKey),
       secretKey: new Uint8Array(storedIdentity.secretKey)
     }
+
+        // ✅ Load or generate identity signing key (Ed25519, MUST be persistent!)
+    let storedSigning = keyStore.getIdentitySigningKeys()
+    if (!storedSigning) {
+      const signKP = nacl.sign.keyPair()
+      storedSigning = {
+        publicKey: signKP.publicKey,
+        secretKey: signKP.secretKey
+      }
+      keyStore.saveIdentitySigningKeys(storedSigning)
+      console.log('[Signal] Generated new identity signing key (Ed25519)')
+    } else {
+      console.log('[Signal] Loaded identity signing key (Ed25519) from storage')
+    }
+
+    this.identitySigningKeyPair = {
+      publicKey: new Uint8Array(storedSigning.publicKey),
+      secretKey: new Uint8Array(storedSigning.secretKey)
+    }
+
 
     // Load or generate signed prekey (MUST be persistent!)
     let storedSignedPreKey = keyStore.getSignedPreKey()

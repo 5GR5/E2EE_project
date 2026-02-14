@@ -14,6 +14,25 @@ export class KeyStore {
     return data ? JSON.parse(data) : null
   }
 
+    // Identity signing keys (Ed25519 long-term)
+  saveIdentitySigningKeys(keys) {
+    localStorage.setItem(this.prefix + 'identity_signing', JSON.stringify({
+      publicKey: Array.from(keys.publicKey),
+      secretKey: Array.from(keys.secretKey)
+    }))
+  }
+
+  getIdentitySigningKeys() {
+    const data = localStorage.getItem(this.prefix + 'identity_signing')
+    if (!data) return null
+    const parsed = JSON.parse(data)
+    return {
+      publicKey: new Uint8Array(parsed.publicKey),
+      secretKey: new Uint8Array(parsed.secretKey)
+    }
+  }
+
+
   // Session state per peer device
   saveSession(peerDeviceId, sessionState) {
     localStorage.setItem(this.prefix + 'session_' + peerDeviceId, JSON.stringify(sessionState))

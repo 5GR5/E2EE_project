@@ -9,6 +9,10 @@ import { MessageInput } from './components/MessageInput'
 import { api } from './services/api'
 import { storage } from './services/storage'
 import './App.css'
+import nacl from 'tweetnacl'
+import { encodeBase64 } from 'tweetnacl-util'
+import { keyStore } from './e2ee/keystore'
+
 
 // Helper function to check if JWT token is expired
 function isTokenExpired(token) {
@@ -142,28 +146,38 @@ function App() {
       const identityPublicKey = encodeBase64(signalProtocol.identityKeyPair.publicKey)
 
       // Create/register this browser as a device with real keys
-      const dev = await api.createDevice(authData.access_token, {
-        device_name: 'web',
-        identity_key_public: identityPublicKey,
-        identity_signing_public: identityPublicKey  // Use same key for now
-      })
+      const dev = await api.createDevice(token,
+        encodeBase64(signalProtocol.identityKeyPair.publicKey),
+        encodeBase64(signalProtocol.identitySigningKeyPair.publicKey))
+
       setDeviceId(dev.id)
 
-      // Upload signed prekey and one-time prekeys to server
-      const keyBundle = signalProtocol.getKeyBundle()
-      await api.uploadKeys(
-        authData.access_token,
-        dev.id,
-        {
-          key_id: keyBundle.signed_prekey_id,
-          public_key: keyBundle.signed_prekey_public,
-          signature: keyBundle.signed_prekey_public  // Using same as public key for simplicity
-        },
-        keyBundle.one_time_prekeys.map(k => ({
-          key_id: k.id,
-          public_key: k.public_key
-        }))
-      )
+    // Build REAL signature: sig = Ed25519_sign(SPK_public_bytes)
+    const signing = keyStore.getIdentitySigningKeys()
+    if (!signing) throw new Error('Missing identity signing keys (Ed25519)')
+
+    const spk = keyStore.getSignedPreKey()
+    if (!spk) throw new Error('Missing signed prekey')
+
+    // Sign raw 32-byte SPK public key bytes
+    const sigBytes = nacl.sign.detached(spk.publicKey, signing.secretKey)
+    const sigB64 = encodeBase64(sigBytes)
+
+    // Upload keys (matches your backend KeysUploadIn schema)
+    await api.uploadKeys(
+      authData.access_token,
+      dev.id,
+      {
+        key_id: 1,
+        public_key: encodeBase64(spk.publicKey),
+        signature: sigB64
+      },
+      keyStore.getOneTimePreKeys().map((kp, i) => ({
+        key_id: i,
+        public_key: encodeBase64(kp.publicKey)
+      }))
+    )
+
       console.log('[App] Keys uploaded to server')
 
       // Save auth with deviceId and userId to localStorage
