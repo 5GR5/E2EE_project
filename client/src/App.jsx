@@ -134,43 +134,48 @@ function App() {
       const payload = JSON.parse(atob(authData.access_token.split('.')[1]))
       setCurrentUserId(payload.sub)
 
-      // Initialize Signal Protocol to generate keys
-      const tempDeviceId = `${username}-device-${Date.now()}`
-      await signalProtocol.initialize(tempDeviceId)
+      // Reuse existing device on login to avoid creating duplicate devices
+      const savedAuth = storage.getAuth()
+      const existingDeviceId = savedAuth.deviceId && savedAuth.username === username ? savedAuth.deviceId : null
 
-      // Get identity key in base64 format
-      const identityPublicKey = encodeBase64(signalProtocol.identityKeyPair.publicKey)
+      let devId
+      if (existingDeviceId) {
+        // Reuse the existing device — just reinitialize Signal Protocol with saved keys
+        await signalProtocol.initialize(existingDeviceId)
+        devId = existingDeviceId
+      } else {
+        // First time (registration or login after logout) — create a fresh device
+        const tempDeviceId = `${username}-device-${Date.now()}`
+        await signalProtocol.initialize(tempDeviceId)
 
-      // Create/register this browser as a device with real keys
-      const dev = await api.createDevice(authData.access_token, {
-        device_name: 'web',
-        identity_key_public: identityPublicKey,
-        identity_signing_public: identityPublicKey  // Use same key for now
-      })
-      setDeviceId(dev.id)
+        const identityPublicKey = encodeBase64(signalProtocol.identityKeyPair.publicKey)
+        const dev = await api.createDevice(authData.access_token, {
+          device_name: 'web',
+          identity_key_public: identityPublicKey,
+          identity_signing_public: encodeBase64(signalProtocol.signingKeyPair.publicKey)
+        })
+        devId = dev.id
 
-      // Upload signed prekey and one-time prekeys to server
-      const keyBundle = signalProtocol.getKeyBundle()
-      await api.uploadKeys(
-        authData.access_token,
-        dev.id,
-        {
-          key_id: keyBundle.signed_prekey_id,
-          public_key: keyBundle.signed_prekey_public,
-          signature: keyBundle.signed_prekey_public  // Using same as public key for simplicity
-        },
-        keyBundle.one_time_prekeys.map(k => ({
-          key_id: k.id,
-          public_key: k.public_key
-        }))
-      )
-      console.log('[App] Keys uploaded to server')
+        const keyBundle = signalProtocol.getKeyBundle()
+        await api.uploadKeys(
+          authData.access_token,
+          devId,
+          {
+            key_id: keyBundle.signed_prekey_id,
+            public_key: keyBundle.signed_prekey_public,
+            signature: keyBundle.signed_prekey_signature
+          },
+          keyBundle.one_time_prekeys.map(k => ({
+            key_id: k.id,
+            public_key: k.public_key
+          }))
+        )
+        console.log('[App] Keys uploaded to server')
+      }
 
-      // Save auth with deviceId and userId to localStorage
-      storage.saveAuth(authData.access_token, username, dev.id, payload.sub)
-
-      // Connect websocket now that we have deviceId
-      wsService.connect(authData.access_token, dev.id)
+      setDeviceId(devId)
+      storage.saveAuth(authData.access_token, username, devId, payload.sub)
+      wsService.connect(authData.access_token, devId)
 
       // Listen for incoming messages via WebSocket
       setupMessageHandler()
@@ -196,6 +201,27 @@ function App() {
 
   const handleSelectUser = (user) => {
     setSelectedUser(user)
+  }
+
+  const handleResetAll = async () => {
+    if (!window.confirm('Delete ALL users, messages and keys? This cannot be undone.')) return
+    try {
+      await api.resetAll(token)
+      handleLogout()
+    } catch (err) {
+      console.error('Reset failed:', err)
+    }
+  }
+
+  const handleDeleteUser = async (user) => {
+    if (!window.confirm(`Delete user "${user.username}"? This cannot be undone.`)) return
+    try {
+      await api.deleteUser(token, user.id)
+      setUsers(prev => prev.filter(u => u.id !== user.id))
+      if (selectedUser?.id === user.id) setSelectedUser(null)
+    } catch (err) {
+      console.error('Failed to delete user:', err)
+    }
   }
 
   const handleSendMessage = async (text) => {
@@ -233,6 +259,8 @@ function App() {
         selectedUser={selectedUser}
         onSelectUser={handleSelectUser}
         onLogout={handleLogout}
+        onDeleteUser={handleDeleteUser}
+        onResetAll={handleResetAll}
       />
 
       <div className="chat-main">

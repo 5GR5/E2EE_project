@@ -11,8 +11,11 @@ class Presence:
         await ws.accept()
         self._sockets[device_id] = ws
 
-    def disconnect(self, device_id: UUID):
-        self._sockets.pop(device_id, None)
+    def disconnect(self, device_id: UUID, ws: WebSocket = None):
+        # Only remove if it's the same WebSocket that registered,
+        # otherwise a newer connection's entry would be wiped out.
+        if ws is None or self._sockets.get(device_id) is ws:
+            self._sockets.pop(device_id, None)
 
     def get(self, device_id: UUID) -> WebSocket | None:
         return self._sockets.get(device_id)

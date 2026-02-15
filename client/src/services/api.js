@@ -1,7 +1,4 @@
 // API service for HTTP calls to the server
-import { wsService } from './websocket'
-
-
 const API_URL = 'http://localhost:8000'
 
 export const api = {
@@ -110,38 +107,28 @@ async createDevice(token, deviceData) {
     return res.json()
   },
 
-  // Send message
-  async sendMessage(token, toUserId, text) {
-    const res = await fetch(`${API_URL}/messages/send`, {
+  async resetAll(token) {
+    const res = await fetch(`${API_URL}/admin/reset`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({ to_user_id: toUserId, text })
+      headers: { 'Authorization': `Bearer ${token}` }
     })
-
     if (!res.ok) {
-      const error = await res.json()
-      throw new Error(error.detail || 'Failed to send message')
+      const error = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
+      throw new Error(error.detail || 'Reset failed')
     }
-
     return res.json()
   },
 
-  // Get messages with another user
-  async getMessages(token, otherUserId) {
-    const res = await fetch(`${API_URL}/messages/${otherUserId}`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
+  async deleteUser(token, userId) {
+    const res = await fetch(`${API_URL}/users/${userId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
     })
-
     if (!res.ok) {
-      const error = await res.json()
-      throw new Error(error.detail || 'Failed to get messages')
+      const error = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
+      throw new Error(error.detail || 'Failed to delete user')
     }
-
     return res.json()
-  }
+  },
+
 }

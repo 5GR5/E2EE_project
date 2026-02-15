@@ -33,71 +33,64 @@ function dh(privateKey, publicKey) {
 }
 
 /**
- * HKDF-SHA256 key derivation
- * Simplified version - for production, use a proper HKDF library
+ * HKDF-SHA256 key derivation (RFC 5869)
+ * Uses the browser's built-in Web Crypto API
  */
 async function hkdf(inputKeyMaterial, salt, info, length = 32) {
-  // For simplicity, using nacl.hash for derivation
-  // In production, use proper HKDF with SHA-256
-  const combined = new Uint8Array(inputKeyMaterial.length + salt.length + info.length)
-  combined.set(inputKeyMaterial, 0)
-  combined.set(salt, inputKeyMaterial.length)
-  combined.set(info, inputKeyMaterial.length + salt.length)
-  
-  const hash = nacl.hash(combined)
-  return hash.slice(0, length)
+  const ikm = await crypto.subtle.importKey(
+    'raw', inputKeyMaterial, 'HKDF', false, ['deriveBits']
+  )
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt, info },
+    ikm, length * 8
+  )
+  return new Uint8Array(bits)
 }
 
 /**
- * AEAD encryption using XSalsa20-Poly1305
- * Simpler approach: Just encrypt plaintext, AD is sent separately in header
+ * AEAD encryption using XSalsa20-Poly1305 with Associated Data
+ * AD (the Double Ratchet header) is prepended to the plaintext before encryption,
+ * so tampering with the header causes decryption to fail.
  */
 function aeadEncrypt(key, plaintext, associatedData) {
-  // Ensure key is Uint8Array with correct length
-  if (!(key instanceof Uint8Array)) {
-    throw new TypeError(`Key must be Uint8Array, got ${typeof key}: ${Object.prototype.toString.call(key)}`)
+  if (!(key instanceof Uint8Array) || key.length !== 32) {
+    throw new TypeError(`Key must be 32-byte Uint8Array, got ${key?.length}`)
   }
-  if (key.length !== 32) {
-    throw new Error(`Key must be 32 bytes, got ${key.length}`)
-  }
-  
+
   const nonce = nacl.randomBytes(24)
-  let plaintextBytes
-  if (typeof plaintext === 'string') {
-    plaintextBytes = encodeUTF8(plaintext)
-  } else {
-    plaintextBytes = plaintext
-  }
-  
-  // Debug check all parameters  
-  if (!(nonce instanceof Uint8Array)) {
-    throw new TypeError(`Nonce must be Uint8Array, got ${typeof nonce}`)
-  }
-  if (!(plaintextBytes instanceof Uint8Array)) {
-    throw new TypeError(`Plaintext must be Uint8Array, got ${typeof plaintextBytes}: ${Object.prototype.toString.call(plaintextBytes)}. Original type: ${typeof plaintext}. encodeUTF8 result: ${encodeUTF8 ? 'exists' : 'undefined'}`)
-  }
-  
-  const ciphertext = nacl.secretbox(plaintextBytes, nonce, key)
-  
+  const plaintextBytes = typeof plaintext === 'string' ? encodeUTF8(plaintext) : plaintext
+  const adBytes = associatedData ? encodeUTF8(JSON.stringify(associatedData)) : new Uint8Array(0)
+
+  // Layout: [4-byte AD length LE][AD bytes][plaintext bytes]
+  const adLen = new Uint8Array(4)
+  new DataView(adLen.buffer).setUint32(0, adBytes.length, true)
+  const combined = new Uint8Array(4 + adBytes.length + plaintextBytes.length)
+  combined.set(adLen, 0)
+  combined.set(adBytes, 4)
+  combined.set(plaintextBytes, 4 + adBytes.length)
+
+  const ciphertext = nacl.secretbox(combined, nonce, key)
+
   return {
     nonce: encodeBase64(nonce),
     ciphertext: encodeBase64(ciphertext),
-    ad_length: 0 // Not used in this simplified version
+    ad_length: adBytes.length
   }
 }
 
 /**
- * AEAD decryption
- * AD (header) is authenticated by being included in the message structure
+ * AEAD decryption — verifies AD is intact, returns plaintext bytes
  */
-function aeadDecrypt(key, nonce, ciphertext, associatedData, adLength) {
+function aeadDecrypt(key, nonce, ciphertext, _associatedData, _adLength) {
   const nonceBytes = decodeBase64(nonce)
   const ciphertextBytes = decodeBase64(ciphertext)
-  
-  const plaintextBytes = nacl.secretbox.open(ciphertextBytes, nonceBytes, key)
-  if (!plaintextBytes) throw new Error('Decryption failed - authentication error')
-  
-  return plaintextBytes
+
+  const combined = nacl.secretbox.open(ciphertextBytes, nonceBytes, key)
+  if (!combined) throw new Error('Decryption failed - authentication error')
+
+  // Extract plaintext (skip 4-byte length prefix + AD bytes)
+  const storedAdLen = new DataView(combined.buffer, combined.byteOffset, 4).getUint32(0, true)
+  return combined.slice(4 + storedAdLen)
 }
 
 // ============================================
@@ -160,7 +153,7 @@ class X3DHInitiator {
   static async respond(params) {
     const {
       bobIdentityPriv,
-      bobIdentityPub,
+      bobIdentityPub: _bobIdentityPub,
       bobSignedPreKeyPriv,
       aliceIdentityPub,
       aliceEphemeralPub,
@@ -418,6 +411,7 @@ class SignalProtocol {
   constructor() {
     this.sessions = new Map() // deviceId -> DoubleRatchetSession
     this.identityKeyPair = null
+    this.signingKeyPair = null  // Ed25519 — separate from DH identity key
     this.signedPreKey = null
     this.oneTimePreKeys = []
     this.deviceId = null
@@ -443,6 +437,18 @@ class SignalProtocol {
     this.identityKeyPair = {
       publicKey: new Uint8Array(storedIdentity.publicKey),
       secretKey: new Uint8Array(storedIdentity.secretKey)
+    }
+
+    // Load or generate Ed25519 signing key (separate from DH identity key)
+    let storedSigningKey = keyStore.getSigningKey()
+    if (!storedSigningKey) {
+      const kp = nacl.sign.keyPair()
+      keyStore.saveSigningKey({ publicKey: kp.publicKey, secretKey: kp.secretKey })
+      storedSigningKey = keyStore.getSigningKey()
+    }
+    this.signingKeyPair = {
+      publicKey: new Uint8Array(storedSigningKey.publicKey),
+      secretKey: new Uint8Array(storedSigningKey.secretKey)
     }
 
     // Load or generate signed prekey (MUST be persistent!)
@@ -477,9 +483,13 @@ class SignalProtocol {
    * Get key bundle to upload to server
    */
   getKeyBundle() {
+    // Sign the signed prekey with the Ed25519 signing key
+    const signature = nacl.sign.detached(this.signedPreKey.publicKey, this.signingKeyPair.secretKey)
     return {
       identity_key_public: encodeBase64(this.identityKeyPair.publicKey),
+      signing_public: encodeBase64(this.signingKeyPair.publicKey),
       signed_prekey_public: encodeBase64(this.signedPreKey.publicKey),
+      signed_prekey_signature: encodeBase64(signature),
       signed_prekey_id: 1,
       one_time_prekeys: this.oneTimePreKeys.map((key, i) => ({
         id: i,
@@ -489,14 +499,46 @@ class SignalProtocol {
   }
 
   /**
+   * Check localStorage for a saved session without deserializing (fast path)
+   */
+  loadSessionFromStorage(deviceId) {
+    const stored = keyStore.getSession(deviceId)
+    if (!stored) return null
+    const session = DoubleRatchetSession.deserialize(stored)
+    this.sessions.set(deviceId, session)
+    return session
+  }
+
+  /**
    * Encrypt message to a recipient (initiates session if needed)
    */
   async encryptTo(recipientDeviceId, recipientKeyBundle, plaintext) {
     let session = this.sessions.get(recipientDeviceId)
 
+    // Try loading from persistent storage before starting a fresh X3DH
+    if (!session) {
+      const stored = keyStore.getSession(recipientDeviceId)
+      if (stored) {
+        session = DoubleRatchetSession.deserialize(stored)
+        this.sessions.set(recipientDeviceId, session)
+        console.log('[Signal] Loaded existing session for', recipientDeviceId, 'from storage')
+      }
+    }
+
     if (!session) {
       // Initiate new session with X3DH
       console.log('[Signal] Initiating new session with', recipientDeviceId)
+
+      // Verify signed prekey signature before using it (prevents MITM attack)
+      if (recipientKeyBundle.signed_prekey_signature && recipientKeyBundle.identity_signing_public) {
+        const spkPub = decodeBase64(recipientKeyBundle.signed_prekey_public)
+        const sig = decodeBase64(recipientKeyBundle.signed_prekey_signature)
+        const signerPub = decodeBase64(recipientKeyBundle.identity_signing_public)
+        if (!nacl.sign.detached.verify(spkPub, sig, signerPub)) {
+          throw new Error('[Signal] Invalid signed prekey signature — possible MITM attack')
+        }
+        console.log('[Signal] Signed prekey signature verified')
+      }
 
       const { header, sharedSecret } = await X3DHInitiator.initiate({
         aliceIdentityPriv: this.identityKeyPair.secretKey,

@@ -161,6 +161,27 @@ body {
   font-weight: 500;
 }
 
+.header-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.btn-reset-db {
+  padding: 8px 12px;
+  background: #3b1a1a;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #e06060;
+  font-size: 16px;
+  transition: background 0.2s;
+}
+
+.btn-reset-db:hover {
+  background: #5a2020;
+}
+
 .btn-logout {
   padding: 8px 12px;
   background: #2a3942;
@@ -174,6 +195,26 @@ body {
 
 .btn-logout:hover {
   background: #3b4a54;
+}
+
+.btn-delete-user {
+  display: none;
+  background: none;
+  border: none;
+  color: #ef4444;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.chat-list-item:hover .btn-delete-user {
+  display: block;
+}
+
+.btn-delete-user:hover {
+  background: #3b1a1a;
 }
 
 .chat-list-search {

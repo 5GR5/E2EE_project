@@ -14,7 +14,7 @@ class WebSocketService {
   }
 
   connect(token, deviceId) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       console.log('WebSocket already connected')
       return
     }
@@ -84,6 +84,7 @@ class WebSocketService {
         type: 'message',
         from_device_id: senderDeviceId,
         from_user_id: data.from_user_id,
+        from_device_name: data.from_device_name,
         text: plaintext,
         timestamp: data.timestamp || new Date().toISOString()
       })
@@ -107,9 +108,10 @@ class WebSocketService {
       throw new Error('WebSocket not connected')
     }
 
-    // Get recipient's key bundle
-    const keyBundle = await this.fetchKeyBundle(toUserId, toDeviceId)
-    
+    // Only fetch the key bundle when no session exists (avoids consuming one-time prekeys unnecessarily)
+    const hasSession = signalProtocol.sessions.has(toDeviceId) || !!signalProtocol.loadSessionFromStorage(toDeviceId)
+    const keyBundle = hasSession ? null : await this.fetchKeyBundle(toUserId, toDeviceId)
+
     // Encrypt using Signal Protocol
     const encrypted = await signalProtocol.encryptTo(toDeviceId, keyBundle, plaintext)
 

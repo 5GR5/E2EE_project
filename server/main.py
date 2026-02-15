@@ -115,6 +115,55 @@ async def get_users(
     ]
     
     
+@app.delete("/users/{user_id}")
+async def delete_user(
+    user_id: UUID,
+    caller_id: str = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
+    """Delete a user and all their data (devices, keys, messages)"""
+    from models import Message
+    from sqlalchemy import delete as sql_delete
+
+    # Get all device IDs for this user
+    result = await session.execute(select(Device).where(Device.user_id == user_id))
+    devices = result.scalars().all()
+    device_ids = [d.id for d in devices]
+
+    # Delete messages referencing these devices (no cascade on Message)
+    if device_ids:
+        for did in device_ids:
+            await session.execute(sql_delete(Message).where(
+                (Message.from_device_id == did) | (Message.to_device_id == did)
+            ))
+
+    # Delete user (cascades to devices → signed_prekeys, one_time_prekeys)
+    result = await session.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(404, "User not found")
+    await session.delete(user)
+    await session.commit()
+    return {"deleted": True}
+
+
+@app.post("/admin/reset")
+async def admin_reset(
+    caller_id: str = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
+    """Delete all users, devices, keys, and messages from the database"""
+    from models import Message
+    from sqlalchemy import delete as sql_delete
+    await session.execute(sql_delete(Message))
+    await session.execute(sql_delete(OneTimePreKey))
+    await session.execute(sql_delete(SignedPreKey))
+    await session.execute(sql_delete(Device))
+    await session.execute(sql_delete(User))
+    await session.commit()
+    return {"reset": True}
+
+
 @app.get("/users/{user_id}/devices")
 async def list_user_devices(
     user_id: UUID,
@@ -153,52 +202,6 @@ async def list_user_devices(
             for d in devices
         ],
     }
-
-# ---- SIMPLE MESSAGES ----
-from simple_messages import create_simple_message, get_messages_between_users
-from pydantic import BaseModel
-
-class SendMessageIn(BaseModel):
-    to_user_id: str
-    text: str
-
-@app.post("/messages/send")
-async def send_message(
-    data: SendMessageIn,
-    user_id: str = Depends(get_current_user_id),
-    session: AsyncSession = Depends(get_session)
-):
-    """Send a simple message to another user"""
-    msg = await create_simple_message(
-        session,
-        from_user_id=UUID(user_id),
-        to_user_id=UUID(data.to_user_id),
-        text=data.text
-    )
-    return {"id": str(msg.id), "created_at": msg.created_at.isoformat()}
-
-@app.get("/messages/{other_user_id}")
-async def get_messages(
-    other_user_id: str,
-    user_id: str = Depends(get_current_user_id),
-    session: AsyncSession = Depends(get_session)
-):
-    """Get all messages between current user and another user"""
-    messages = await get_messages_between_users(
-        session,
-        user1_id=UUID(user_id),
-        user2_id=UUID(other_user_id)
-    )
-    return [
-        {
-            "id": str(msg.id),
-            "from_user_id": str(msg.from_user_id),
-            "to_user_id": str(msg.to_user_id),
-            "text": msg.text,
-            "created_at": msg.created_at.isoformat()
-        }
-        for msg in messages
-    ]
 
 # ---- DEVICES ----
 
@@ -356,22 +359,25 @@ async def ws_endpoint(
     # Flush undelivered
     pending = await get_undelivered_messages(session, device_id)
     for m in pending:
-        # Get sender's user_id and device_name from device
-        sender_device = await get_device(session, m.from_device_id)
-        await ws.send_text(json.dumps({
-            "type": "deliver",
-            "from_device_id": str(m.from_device_id),
-            "from_user_id": str(sender_device.user_id) if sender_device else None,
-            "from_device_name": sender_device.device_name if sender_device else "Unknown Device",
-            "message_id": m.message_id,
-            "header": m.header,
-            "ciphertext": m.ciphertext,
-            "nonce": m.nonce,
-            "ad_length": m.ad_length,
-            "is_initial_message": m.is_initial_message,
-            "x3dh_header": m.x3dh_header,
-            "server_ts": m.server_ts.isoformat(),
-        }))
+        try:
+            # Get sender's user_id and device_name from device
+            sender_device = await get_device(session, m.from_device_id)
+            await ws.send_text(json.dumps({
+                "type": "deliver",
+                "from_device_id": str(m.from_device_id),
+                "from_user_id": str(sender_device.user_id) if sender_device else None,
+                "from_device_name": sender_device.device_name if sender_device else "Unknown Device",
+                "message_id": m.message_id,
+                "header": m.header,
+                "ciphertext": m.ciphertext,
+                "nonce": m.nonce,
+                "ad_length": m.ad_length,
+                "is_initial_message": m.is_initial_message,
+                "x3dh_header": m.x3dh_header,
+                "server_ts": m.server_ts.isoformat(),
+            }))
+        except Exception:
+            break  # Connection broke during flush; the message stays undelivered for next connect
 
     try:
         while True:
@@ -402,20 +408,25 @@ async def ws_endpoint(
                 # deliver if online
                 peer_ws = presence.get(to_device_id)
                 if peer_ws:
-                    await peer_ws.send_text(json.dumps({
-                        "type": "deliver",
-                        "from_device_id": str(device_id),
-                        "from_user_id": str(user_id),
-                        "from_device_name": device.device_name,  # Include device name
-                        "message_id": message_id,
-                        "header": header,
-                        "ciphertext": ciphertext,
-                        "nonce": nonce,
-                        "ad_length": ad_length,
-                        "is_initial_message": is_initial_message,
-                        "x3dh_header": x3dh_header,
-                        "server_ts": "",  # optional fill after re-read
-                    }))
+                    try:
+                        await peer_ws.send_text(json.dumps({
+                            "type": "deliver",
+                            "from_device_id": str(device_id),
+                            "from_user_id": str(user_id),
+                            "from_device_name": device.device_name,
+                            "message_id": message_id,
+                            "header": header,
+                            "ciphertext": ciphertext,
+                            "nonce": nonce,
+                            "ad_length": ad_length,
+                            "is_initial_message": is_initial_message,
+                            "x3dh_header": x3dh_header,
+                            "server_ts": "",
+                        }))
+                    except Exception:
+                        # Peer's connection is stale — remove it so the message
+                        # will be queued for offline delivery on their next connect.
+                        presence.disconnect(to_device_id, peer_ws)
 
             elif mtype == "ack_delivered":
                 message_id = msg["message_id"]
@@ -432,7 +443,7 @@ async def ws_endpoint(
                 pass
 
     except Exception:
-        presence.disconnect(device_id)
+        presence.disconnect(device_id, ws)
         try:
             await ws.close()
         except Exception:

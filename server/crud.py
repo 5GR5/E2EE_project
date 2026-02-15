@@ -103,5 +103,3 @@ async def consume_one_time_prekey(session: AsyncSession, device_id: UUID) -> One
 
     return opk
 
-def get_devices_by_user(db, user_id: str):
-    return db.query(models.Device).filter(models.Device.user_id == user_id).all()

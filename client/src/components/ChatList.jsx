@@ -1,4 +1,4 @@
-export function ChatList({ users, currentUser, selectedUser, onSelectUser, onLogout }) {
+export function ChatList({ users, currentUser, selectedUser, onSelectUser, onLogout, onDeleteUser, onResetAll }) {
   return (
     <div className="chat-list">
       <div className="chat-list-header">
@@ -6,9 +6,16 @@ export function ChatList({ users, currentUser, selectedUser, onSelectUser, onLog
           <div className="user-avatar">{currentUser[0].toUpperCase()}</div>
           <span className="user-name">{currentUser}</span>
         </div>
-        <button onClick={onLogout} className="btn-logout" title="Logout">
-          ⎋
-        </button>
+        <div className="header-actions">
+          {onResetAll && (
+            <button onClick={onResetAll} className="btn-reset-db" title="Clear all data (Admin)">
+              🗑
+            </button>
+          )}
+          <button onClick={onLogout} className="btn-logout" title="Logout">
+            ⎋
+          </button>
+        </div>
       </div>
 
       <div className="chat-list-search">
@@ -37,6 +44,15 @@ export function ChatList({ users, currentUser, selectedUser, onSelectUser, onLog
               </div>
               {user.unread > 0 && (
                 <div className="unread-badge">{user.unread}</div>
+              )}
+              {onDeleteUser && (
+                <button
+                  className="btn-delete-user"
+                  title={`Delete ${user.username}`}
+                  onClick={(e) => { e.stopPropagation(); onDeleteUser(user) }}
+                >
+                  ✕
+                </button>
               )}
             </div>
           ))

@@ -33,6 +33,24 @@ export class KeyStore {
     return localStorage.getItem(this.prefix + 'device_id')
   }
 
+  // Ed25519 signing key (separate from DH identity key)
+  saveSigningKey(keyPair) {
+    localStorage.setItem(this.prefix + 'signing_key', JSON.stringify({
+      publicKey: Array.from(keyPair.publicKey),
+      secretKey: Array.from(keyPair.secretKey)
+    }))
+  }
+
+  getSigningKey() {
+    const data = localStorage.getItem(this.prefix + 'signing_key')
+    if (!data) return null
+    const parsed = JSON.parse(data)
+    return {
+      publicKey: new Uint8Array(parsed.publicKey),
+      secretKey: new Uint8Array(parsed.secretKey)
+    }
+  }
+
   // Signed prekey
   saveSignedPreKey(keyPair) {
     localStorage.setItem(this.prefix + 'signed_prekey', JSON.stringify({
