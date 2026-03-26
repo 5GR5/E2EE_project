@@ -1,8 +1,16 @@
-// API service for HTTP calls to the server
+/**
+ * API service for HTTP calls to the E2EE messaging server.
+ * Handles authentication, device management, key exchange, and user operations.
+ */
 const API_URL = 'http://localhost:8000'
 
 export const api = {
-  // Authentication
+  /**
+   * Register a new user account.
+   * @param {string} username - Unique username
+   * @param {string} password - User password
+   * @returns {Promise<{access_token: string, token_type: string}>}
+   */
   async register(username, password) {
     const res = await fetch(`${API_URL}/auth/register`, {
       method: 'POST',
@@ -18,6 +26,12 @@ export const api = {
     return res.json() // { access_token, token_type }
   },
 
+  /**
+   * Authenticate an existing user.
+   * @param {string} username
+   * @param {string} password
+   * @returns {Promise<{access_token: string, token_type: string}>}
+   */
   async login(username, password) {
     const res = await fetch(`${API_URL}/auth/login`, {
       method: 'POST',

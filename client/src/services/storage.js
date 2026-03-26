@@ -1,4 +1,9 @@
-// localStorage service for persisting data
+/**
+ * localStorage service for persisting authentication and message data.
+ * Uses versioned keys (_v2) to handle schema migrations gracefully.
+ *
+ * Stores: auth tokens, device IDs, message history, and user lists.
+ */
 
 const STORAGE_KEYS = {
   TOKEN: 'auth_token_v2',
