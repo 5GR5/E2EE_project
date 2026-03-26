@@ -4,9 +4,9 @@ Get your WhatsApp-like E2EE messaging app running in 5 minutes!
 
 ## Prerequisites
 
-- Python 3.9+ installed
+- Python 3.10+ installed
 - Node.js 16+ installed
-- PostgreSQL running (or update DATABASE_URL in server/db.py)
+- SQLite (built-in, no setup required)
 
 ## Setup Steps
 
@@ -14,17 +14,17 @@ Get your WhatsApp-like E2EE messaging app running in 5 minutes!
 
 ```bash
 # Initialize the database tables
-python init_db.py
+python scripts/init_db.py
 
 # Create 4 demo users: alice, bob, charlie, david (password: demo123)
-python create_demo_users.py
+python scripts/create_demo_users.py
 ```
 
 ### 2. Start the server
 
 ```bash
 cd server
-pip install -r requierments.txt
+pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 

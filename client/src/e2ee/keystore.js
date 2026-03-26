@@ -1,39 +1,68 @@
 // Simple localStorage-based key storage
 export class KeyStore {
+  /**
+   * Creates a new KeyStore instance with localStorage backing.
+   */
   constructor() {
     this.prefix = 'e2ee_'
   }
 
-  // Identity keys (long-term)
+  /**
+   * Saves the X25519 identity key pair to localStorage.
+   * @param {Object} keys - The identity key pair object
+   */
   saveIdentityKeys(keys) {
     localStorage.setItem(this.prefix + 'identity', JSON.stringify(keys))
   }
 
+  /**
+   * Retrieves the X25519 identity key pair from localStorage.
+   * @returns {Object|null} The identity key pair or null if not found
+   */
   getIdentityKeys() {
     const data = localStorage.getItem(this.prefix + 'identity')
     return data ? JSON.parse(data) : null
   }
 
-  // Session state per peer device
+  /**
+   * Saves the Double Ratchet session state for a peer device.
+   * @param {string} peerDeviceId - The device ID of the peer
+   * @param {Object} sessionState - The session state to save
+   */
   saveSession(peerDeviceId, sessionState) {
     localStorage.setItem(this.prefix + 'session_' + peerDeviceId, JSON.stringify(sessionState))
   }
 
+  /**
+   * Retrieves the Double Ratchet session state for a peer device.
+   * @param {string} peerDeviceId - The device ID of the peer
+   * @returns {Object|null} The session state or null if not found
+   */
   getSession(peerDeviceId) {
     const data = localStorage.getItem(this.prefix + 'session_' + peerDeviceId)
     return data ? JSON.parse(data) : null
   }
 
-  // Device ID
+  /**
+   * Saves the current device ID.
+   * @param {string} deviceId - The device ID to save
+   */
   saveDeviceId(deviceId) {
     localStorage.setItem(this.prefix + 'device_id', deviceId)
   }
 
+  /**
+   * Retrieves the current device ID.
+   * @returns {string|null} The device ID or null if not set
+   */
   getDeviceId() {
     return localStorage.getItem(this.prefix + 'device_id')
   }
 
-  // Ed25519 signing key (separate from DH identity key)
+  /**
+   * Saves the Ed25519 signing key pair.
+   * @param {Object} keyPair - The signing key pair with publicKey and secretKey Uint8Arrays
+   */
   saveSigningKey(keyPair) {
     localStorage.setItem(this.prefix + 'signing_key', JSON.stringify({
       publicKey: Array.from(keyPair.publicKey),
@@ -41,6 +70,10 @@ export class KeyStore {
     }))
   }
 
+  /**
+   * Retrieves the Ed25519 signing key pair.
+   * @returns {Object|null} The signing key pair or null if not found
+   */
   getSigningKey() {
     const data = localStorage.getItem(this.prefix + 'signing_key')
     if (!data) return null
@@ -51,7 +84,10 @@ export class KeyStore {
     }
   }
 
-  // Signed prekey
+  /**
+   * Saves the signed prekey pair.
+   * @param {Object} keyPair - The signed prekey pair with publicKey and secretKey Uint8Arrays
+   */
   saveSignedPreKey(keyPair) {
     localStorage.setItem(this.prefix + 'signed_prekey', JSON.stringify({
       publicKey: Array.from(keyPair.publicKey),
@@ -59,6 +95,10 @@ export class KeyStore {
     }))
   }
 
+  /**
+   * Retrieves the signed prekey pair.
+   * @returns {Object|null} The signed prekey pair or null if not found
+   */
   getSignedPreKey() {
     const data = localStorage.getItem(this.prefix + 'signed_prekey')
     if (!data) return null
@@ -69,7 +109,10 @@ export class KeyStore {
     }
   }
 
-  // One-time prekeys
+  /**
+   * Saves the one-time prekey pairs.
+   * @param {Array} keyPairs - Array of one-time prekey pairs
+   */
   saveOneTimePreKeys(keyPairs) {
     localStorage.setItem(this.prefix + 'one_time_prekeys', JSON.stringify(
       keyPairs.map(kp => ({
@@ -79,6 +122,10 @@ export class KeyStore {
     ))
   }
 
+  /**
+   * Retrieves the one-time prekey pairs.
+   * @returns {Array|null} Array of one-time prekey pairs or null if not found
+   */
   getOneTimePreKeys() {
     const data = localStorage.getItem(this.prefix + 'one_time_prekeys')
     if (!data) return null
@@ -89,6 +136,9 @@ export class KeyStore {
     }))
   }
 
+  /**
+   * Clears all stored keys and sessions from localStorage.
+   */
   clear() {
     const keys = Object.keys(localStorage)
     keys.forEach(key => {

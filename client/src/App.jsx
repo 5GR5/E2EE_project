@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react'
+import { encodeBase64 } from 'tweetnacl-util'
+
+import { api } from './services/api'
+import { storage } from './services/storage'
 import { wsService } from './services/websocket'
 import { signalProtocol } from './e2ee/signal-protocol'
-import { encodeBase64 } from 'tweetnacl-util'
 import { Auth } from './components/Auth'
 import { ChatList } from './components/ChatList'
 import { ChatWindow } from './components/ChatWindow'
 import { MessageInput } from './components/MessageInput'
-import { api } from './services/api'
-import { storage } from './services/storage'
+
 import './App.css'
 
 // Helper function to check if JWT token is expired
