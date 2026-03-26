@@ -1,3 +1,14 @@
+"""
+SQLAlchemy ORM models for the E2EE messaging database.
+
+Defines the core entities:
+- User: Account with username and password hash
+- Device: User's device with identity keys (supports multi-device)
+- SignedPreKey: Medium-term prekeys signed by device identity
+- OneTimePreKey: Single-use prekeys for X3DH key agreement
+- Message: Encrypted message storage with delivery tracking
+"""
+
 import uuid
 from datetime import datetime
 from sqlalchemy import (

@@ -1,3 +1,10 @@
+"""
+Authentication module for the E2EE messaging server.
+
+Provides JWT-based authentication with simple password hashing.
+For production use, replace with bcrypt or argon2.
+"""
+
 import os
 import jwt
 import hashlib
@@ -18,9 +25,11 @@ def hash_password(p: str) -> str:
     return hashlib.sha256((p + salt).encode()).hexdigest()
 
 def verify_password(p: str, hashed: str) -> bool:
+    """Compare plain password against stored hash."""
     return hash_password(p) == hashed
 
 def create_access_token(user_id: str) -> str:
+    """Generate a JWT access token with expiration for the given user."""
     now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
