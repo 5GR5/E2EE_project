@@ -21,6 +21,22 @@ import { keyStore } from './keystore'
 const encodeUTF8 = stringToBytes  // string → Uint8Array
 const decodeUTF8 = bytesToString  // Uint8Array → string
 
+function canonicalStringify(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(canonicalStringify).join(',')}]`
+  const keys = Object.keys(value).sort()
+  return `{${keys.map(k => `${JSON.stringify(k)}:${canonicalStringify(value[k])}`).join(',')}}`
+}
+
+function bytesEqual(a, b) {
+  if (!(a instanceof Uint8Array) || !(b instanceof Uint8Array) || a.length !== b.length) {
+    return false
+  }
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i]
+  return diff === 0
+}
+
 // ============================================
 // Crypto Primitives (Mirror Python implementation)
 // ============================================
@@ -59,7 +75,7 @@ function aeadEncrypt(key, plaintext, associatedData) {
 
   const nonce = nacl.randomBytes(24)
   const plaintextBytes = typeof plaintext === 'string' ? encodeUTF8(plaintext) : plaintext
-  const adBytes = associatedData ? encodeUTF8(JSON.stringify(associatedData)) : new Uint8Array(0)
+  const adBytes = associatedData ? encodeUTF8(canonicalStringify(associatedData)) : new Uint8Array(0)
 
   // Layout: [4-byte AD length LE][AD bytes][plaintext bytes]
   const adLen = new Uint8Array(4)
@@ -81,15 +97,23 @@ function aeadEncrypt(key, plaintext, associatedData) {
 /**
  * AEAD decryption — verifies AD is intact, returns plaintext bytes
  */
-function aeadDecrypt(key, nonce, ciphertext, _associatedData, _adLength) {
+function aeadDecrypt(key, nonce, ciphertext, associatedData, adLength) {
   const nonceBytes = decodeBase64(nonce)
   const ciphertextBytes = decodeBase64(ciphertext)
 
   const combined = nacl.secretbox.open(ciphertextBytes, nonceBytes, key)
   if (!combined) throw new Error('Decryption failed - authentication error')
 
-  // Extract plaintext (skip 4-byte length prefix + AD bytes)
+  // Extract and verify stored AD
   const storedAdLen = new DataView(combined.buffer, combined.byteOffset, 4).getUint32(0, true)
+  if (typeof adLength === 'number' && storedAdLen !== adLength) {
+    throw new Error('Decryption failed - AD length mismatch')
+  }
+  const storedAdBytes = combined.slice(4, 4 + storedAdLen)
+  const expectedAdBytes = associatedData ? encodeUTF8(canonicalStringify(associatedData)) : new Uint8Array(0)
+  if (!bytesEqual(storedAdBytes, expectedAdBytes)) {
+    throw new Error('Decryption failed - associated data mismatch')
+  }
   return combined.slice(4 + storedAdLen)
 }
 
@@ -121,14 +145,16 @@ class X3DHInitiator {
     const dh1 = dh(aliceIdentityPriv, bobSignedPreKeyPub)
     const dh2 = dh(ephemeral.secretKey, bobIdentityPub)
     const dh3 = dh(ephemeral.secretKey, bobSignedPreKeyPub)
-    const dh4 = bobOneTimePreKeyPub ? dh(ephemeral.secretKey, bobOneTimePreKeyPub) : new Uint8Array(32)
-
-    // Concatenate DH outputs
-    const dhConcat = new Uint8Array(128)
-    dhConcat.set(dh1, 0)
-    dhConcat.set(dh2, 32)
-    dhConcat.set(dh3, 64)
-    dhConcat.set(dh4, 96)
+    const dhParts = [dh1, dh2, dh3]
+    if (bobOneTimePreKeyPub) {
+      dhParts.push(dh(ephemeral.secretKey, bobOneTimePreKeyPub))
+    }
+    const dhConcat = new Uint8Array(dhParts.reduce((sum, part) => sum + part.length, 0))
+    let offset = 0
+    for (const part of dhParts) {
+      dhConcat.set(part, offset)
+      offset += part.length
+    }
 
     // Derive shared secret using HKDF
     const salt = new Uint8Array(32) // 32 zero bytes
@@ -164,14 +190,16 @@ class X3DHInitiator {
     const dh1 = dh(bobSignedPreKeyPriv, aliceIdentityPub)
     const dh2 = dh(bobIdentityPriv, aliceEphemeralPub)
     const dh3 = dh(bobSignedPreKeyPriv, aliceEphemeralPub)
-    const dh4 = bobOneTimePreKeyPriv ? dh(bobOneTimePreKeyPriv, aliceEphemeralPub) : new Uint8Array(32)
-
-    // Concatenate DH outputs (same order as Alice)
-    const dhConcat = new Uint8Array(128)
-    dhConcat.set(dh1, 0)
-    dhConcat.set(dh2, 32)
-    dhConcat.set(dh3, 64)
-    dhConcat.set(dh4, 96)
+    const dhParts = [dh1, dh2, dh3]
+    if (bobOneTimePreKeyPriv) {
+      dhParts.push(dh(bobOneTimePreKeyPriv, aliceEphemeralPub))
+    }
+    const dhConcat = new Uint8Array(dhParts.reduce((sum, part) => sum + part.length, 0))
+    let offset = 0
+    for (const part of dhParts) {
+      dhConcat.set(part, offset)
+      offset += part.length
+    }
 
     // Derive same shared secret
     const salt = new Uint8Array(32)
@@ -420,8 +448,9 @@ class SignalProtocol {
   /**
    * Initialize identity and prekeys
    */
-  async initialize(deviceId) {
+  async initialize(deviceId, storageScope = deviceId) {
     this.deviceId = deviceId
+    keyStore.setScope(storageScope)
 
     // Load or generate identity key
     let storedIdentity = keyStore.getIdentityKeys()
@@ -491,10 +520,9 @@ class SignalProtocol {
       signed_prekey_public: encodeBase64(this.signedPreKey.publicKey),
       signed_prekey_signature: encodeBase64(signature),
       signed_prekey_id: 1,
-      one_time_prekeys: this.oneTimePreKeys.map((key, i) => ({
-        id: i,
-        public_key: encodeBase64(key.publicKey)
-      }))
+      one_time_prekeys: this.oneTimePreKeys
+        .map((key, i) => (key ? { id: i, public_key: encodeBase64(key.publicKey) } : null))
+        .filter(Boolean)
     }
   }
 
@@ -530,15 +558,18 @@ class SignalProtocol {
       console.log('[Signal] Initiating new session with', recipientDeviceId)
 
       // Verify signed prekey signature before using it (prevents MITM attack)
-      if (recipientKeyBundle.signed_prekey_signature && recipientKeyBundle.identity_signing_public) {
-        const spkPub = decodeBase64(recipientKeyBundle.signed_prekey_public)
-        const sig = decodeBase64(recipientKeyBundle.signed_prekey_signature)
-        const signerPub = decodeBase64(recipientKeyBundle.identity_signing_public)
-        if (!nacl.sign.detached.verify(spkPub, sig, signerPub)) {
-          throw new Error('[Signal] Invalid signed prekey signature — possible MITM attack')
-        }
-        console.log('[Signal] Signed prekey signature verified')
+      if (!recipientKeyBundle.signed_prekey_public ||
+          !recipientKeyBundle.signed_prekey_signature ||
+          !recipientKeyBundle.identity_signing_public) {
+        throw new Error('[Signal] Incomplete recipient key bundle')
       }
+      const spkPub = decodeBase64(recipientKeyBundle.signed_prekey_public)
+      const sig = decodeBase64(recipientKeyBundle.signed_prekey_signature)
+      const signerPub = decodeBase64(recipientKeyBundle.identity_signing_public)
+      if (!nacl.sign.detached.verify(spkPub, sig, signerPub)) {
+        throw new Error('[Signal] Invalid signed prekey signature — possible MITM attack')
+      }
+      console.log('[Signal] Signed prekey signature verified')
 
       const { header, sharedSecret } = await X3DHInitiator.initiate({
         aliceIdentityPriv: this.identityKeyPair.secretKey,
@@ -596,7 +627,14 @@ class SignalProtocol {
       let oneTimePreKeyPriv = null
       if (header.receiver_one_time_prekey_id !== null) {
         const opk = this.oneTimePreKeys[header.receiver_one_time_prekey_id]
-        if (opk) oneTimePreKeyPriv = opk.secretKey
+        if (opk) {
+          oneTimePreKeyPriv = opk.secretKey
+          // One-time prekey must not be reused.
+          this.oneTimePreKeys[header.receiver_one_time_prekey_id] = null
+          keyStore.saveOneTimePreKeys(this.oneTimePreKeys)
+        } else {
+          throw new Error('Missing one-time prekey for initial message')
+        }
       }
 
       const sharedSecret = await X3DHInitiator.respond({
