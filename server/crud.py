@@ -85,21 +85,28 @@ async def consume_one_time_prekey(session: AsyncSession, device_id: UUID) -> One
     """
     from sqlalchemy import update
 
-    # Find first available one-time prekey
-    res = await session.execute(
-        select(OneTimePreKey)
-        .where(OneTimePreKey.device_id == device_id, OneTimePreKey.consumed_at.is_(None))
-        .order_by(OneTimePreKey.created_at.asc())
-        .limit(1)
-    )
-    opk = res.scalar_one_or_none()
+    # Best-effort compare-and-set loop for SQLite (no FOR UPDATE SKIP LOCKED).
+    for _ in range(3):
+        res = await session.execute(
+            select(OneTimePreKey)
+            .where(OneTimePreKey.device_id == device_id, OneTimePreKey.consumed_at.is_(None))
+            .order_by(OneTimePreKey.created_at.asc())
+            .limit(1)
+        )
+        opk = res.scalar_one_or_none()
 
-    if not opk:
-        return None
+        if not opk:
+            return None
 
-    # Mark as consumed
-    opk.consumed_at = datetime.utcnow()
-    await session.flush()
+        consumed_at = datetime.utcnow()
+        update_res = await session.execute(
+            update(OneTimePreKey)
+            .where(OneTimePreKey.id == opk.id, OneTimePreKey.consumed_at.is_(None))
+            .values(consumed_at=consumed_at)
+        )
+        if update_res.rowcount == 1:
+            opk.consumed_at = consumed_at
+            await session.flush()
+            return opk
 
-    return opk
-
+    return None
