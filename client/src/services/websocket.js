@@ -13,7 +13,7 @@ class WebSocketService {
     this.statusHandlers = []
   }
 
-  connect(token, deviceId) {
+  connect(token, deviceId, storageScope = deviceId) {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       console.log('WebSocket already connected')
       return
@@ -23,7 +23,7 @@ class WebSocketService {
     this.deviceId = deviceId
 
     // Initialize Signal Protocol
-    signalProtocol.initialize(deviceId).then(() => {
+    signalProtocol.initialize(deviceId, storageScope).then(() => {
       console.log('[WS] Signal Protocol initialized')
     })
 
@@ -152,35 +152,16 @@ class WebSocketService {
       if (!response.ok) {
         const errorText = await response.text()
         console.error('[WS] Key bundle fetch failed:', response.status, errorText)
-
-        // Fallback: get basic device info
-        console.log('[WS] Trying fallback: get device info')
-        const devicesResponse = await fetch(`${API_URL}/users/${userId}/devices`, {
-          headers: { 'Authorization': `Bearer ${this.token}` }
-        })
-
-        if (!devicesResponse.ok) {
-          const fallbackError = await devicesResponse.text()
-          console.error('[WS] Fallback also failed:', fallbackError)
-          throw new Error(`Failed to fetch key bundle: ${response.status}`)
-        }
-
-        const { devices } = await devicesResponse.json()
-        console.log('[WS] Got devices:', devices)
-        const device = devices.find(d => d.device_id === deviceId || d.id === deviceId)
-
-        if (!device) throw new Error('Device not found')
-
-        return {
-          identity_key_public: device.identity_key_public,
-          signed_prekey_public: device.identity_key_public, // Fallback
-          signed_prekey_id: 1,
-          one_time_prekey_public: null,
-          one_time_prekey_id: null
-        }
+        throw new Error(`Failed to fetch key bundle: ${response.status}`)
       }
 
       const bundle = await response.json()
+      const required = ['identity_key_public', 'identity_signing_public', 'signed_prekey_public', 'signed_prekey_signature']
+      for (const field of required) {
+        if (!bundle[field]) {
+          throw new Error(`Invalid key bundle: missing ${field}`)
+        }
+      }
       console.log('[WS] Got key bundle:', bundle)
       return bundle
     } catch (err) {
@@ -257,4 +238,3 @@ export async function listUserDevices(userId, token) {
   if (!res.ok) throw new Error("Failed to fetch user devices")
   return await res.json() // { user_id, devices:[{device_id, device_name}] }
 }
-

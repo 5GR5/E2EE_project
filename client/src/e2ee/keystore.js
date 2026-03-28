@@ -5,6 +5,19 @@ export class KeyStore {
    */
   constructor() {
     this.prefix = 'e2ee_'
+    this.scope = 'default'
+  }
+
+  /**
+   * Set logical storage scope (e.g. username) to isolate identities/sessions.
+   */
+  setScope(scope) {
+    const normalized = String(scope || 'default').trim().replace(/[^a-zA-Z0-9_.-]/g, '_')
+    this.scope = normalized || 'default'
+  }
+
+  key(name) {
+    return `${this.prefix}${this.scope}_${name}`
   }
 
   /**
@@ -12,7 +25,7 @@ export class KeyStore {
    * @param {Object} keys - The identity key pair object
    */
   saveIdentityKeys(keys) {
-    localStorage.setItem(this.prefix + 'identity', JSON.stringify(keys))
+    localStorage.setItem(this.key('identity'), JSON.stringify(keys))
   }
 
   /**
@@ -20,7 +33,7 @@ export class KeyStore {
    * @returns {Object|null} The identity key pair or null if not found
    */
   getIdentityKeys() {
-    const data = localStorage.getItem(this.prefix + 'identity')
+    const data = localStorage.getItem(this.key('identity'))
     return data ? JSON.parse(data) : null
   }
 
@@ -30,7 +43,7 @@ export class KeyStore {
    * @param {Object} sessionState - The session state to save
    */
   saveSession(peerDeviceId, sessionState) {
-    localStorage.setItem(this.prefix + 'session_' + peerDeviceId, JSON.stringify(sessionState))
+    localStorage.setItem(this.key(`session_${peerDeviceId}`), JSON.stringify(sessionState))
   }
 
   /**
@@ -39,7 +52,7 @@ export class KeyStore {
    * @returns {Object|null} The session state or null if not found
    */
   getSession(peerDeviceId) {
-    const data = localStorage.getItem(this.prefix + 'session_' + peerDeviceId)
+    const data = localStorage.getItem(this.key(`session_${peerDeviceId}`))
     return data ? JSON.parse(data) : null
   }
 
@@ -48,7 +61,7 @@ export class KeyStore {
    * @param {string} deviceId - The device ID to save
    */
   saveDeviceId(deviceId) {
-    localStorage.setItem(this.prefix + 'device_id', deviceId)
+    localStorage.setItem(this.key('device_id'), deviceId)
   }
 
   /**
@@ -56,7 +69,7 @@ export class KeyStore {
    * @returns {string|null} The device ID or null if not set
    */
   getDeviceId() {
-    return localStorage.getItem(this.prefix + 'device_id')
+    return localStorage.getItem(this.key('device_id'))
   }
 
   /**
@@ -64,7 +77,7 @@ export class KeyStore {
    * @param {Object} keyPair - The signing key pair with publicKey and secretKey Uint8Arrays
    */
   saveSigningKey(keyPair) {
-    localStorage.setItem(this.prefix + 'signing_key', JSON.stringify({
+    localStorage.setItem(this.key('signing_key'), JSON.stringify({
       publicKey: Array.from(keyPair.publicKey),
       secretKey: Array.from(keyPair.secretKey)
     }))
@@ -75,7 +88,7 @@ export class KeyStore {
    * @returns {Object|null} The signing key pair or null if not found
    */
   getSigningKey() {
-    const data = localStorage.getItem(this.prefix + 'signing_key')
+    const data = localStorage.getItem(this.key('signing_key'))
     if (!data) return null
     const parsed = JSON.parse(data)
     return {
@@ -89,7 +102,7 @@ export class KeyStore {
    * @param {Object} keyPair - The signed prekey pair with publicKey and secretKey Uint8Arrays
    */
   saveSignedPreKey(keyPair) {
-    localStorage.setItem(this.prefix + 'signed_prekey', JSON.stringify({
+    localStorage.setItem(this.key('signed_prekey'), JSON.stringify({
       publicKey: Array.from(keyPair.publicKey),
       secretKey: Array.from(keyPair.secretKey)
     }))
@@ -100,7 +113,7 @@ export class KeyStore {
    * @returns {Object|null} The signed prekey pair or null if not found
    */
   getSignedPreKey() {
-    const data = localStorage.getItem(this.prefix + 'signed_prekey')
+    const data = localStorage.getItem(this.key('signed_prekey'))
     if (!data) return null
     const parsed = JSON.parse(data)
     return {
@@ -114,11 +127,14 @@ export class KeyStore {
    * @param {Array} keyPairs - Array of one-time prekey pairs
    */
   saveOneTimePreKeys(keyPairs) {
-    localStorage.setItem(this.prefix + 'one_time_prekeys', JSON.stringify(
-      keyPairs.map(kp => ({
-        publicKey: Array.from(kp.publicKey),
-        secretKey: Array.from(kp.secretKey)
-      }))
+    localStorage.setItem(this.key('one_time_prekeys'), JSON.stringify(
+      keyPairs.map(kp => {
+        if (!kp) return null
+        return {
+          publicKey: Array.from(kp.publicKey),
+          secretKey: Array.from(kp.secretKey)
+        }
+      })
     ))
   }
 
@@ -127,13 +143,16 @@ export class KeyStore {
    * @returns {Array|null} Array of one-time prekey pairs or null if not found
    */
   getOneTimePreKeys() {
-    const data = localStorage.getItem(this.prefix + 'one_time_prekeys')
+    const data = localStorage.getItem(this.key('one_time_prekeys'))
     if (!data) return null
     const parsed = JSON.parse(data)
-    return parsed.map(kp => ({
-      publicKey: new Uint8Array(kp.publicKey),
-      secretKey: new Uint8Array(kp.secretKey)
-    }))
+    return parsed.map(kp => {
+      if (!kp) return null
+      return {
+        publicKey: new Uint8Array(kp.publicKey),
+        secretKey: new Uint8Array(kp.secretKey)
+      }
+    })
   }
 
   /**
@@ -142,7 +161,7 @@ export class KeyStore {
   clear() {
     const keys = Object.keys(localStorage)
     keys.forEach(key => {
-      if (key.startsWith(this.prefix)) {
+      if (key.startsWith(`${this.prefix}${this.scope}_`)) {
         localStorage.removeItem(key)
       }
     })

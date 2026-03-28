@@ -80,7 +80,7 @@ function App() {
         // Restore deviceId and reconnect WebSocket if available
         if (savedAuth.deviceId) {
           setDeviceId(savedAuth.deviceId)
-          wsService.connect(savedAuth.token, savedAuth.deviceId)
+          wsService.connect(savedAuth.token, savedAuth.deviceId, savedAuth.username)
           // Setup message handler for restored session
           setupMessageHandler()
         }
@@ -143,12 +143,12 @@ function App() {
       let devId
       if (existingDeviceId) {
         // Reuse the existing device — just reinitialize Signal Protocol with saved keys
-        await signalProtocol.initialize(existingDeviceId)
+        await signalProtocol.initialize(existingDeviceId, username)
         devId = existingDeviceId
       } else {
         // First time (registration or login after logout) — create a fresh device
         const tempDeviceId = `${username}-device-${Date.now()}`
-        await signalProtocol.initialize(tempDeviceId)
+        await signalProtocol.initialize(tempDeviceId, username)
 
         const identityPublicKey = encodeBase64(signalProtocol.identityKeyPair.publicKey)
         const dev = await api.createDevice(authData.access_token, {
@@ -177,7 +177,7 @@ function App() {
 
       setDeviceId(devId)
       storage.saveAuth(authData.access_token, username, devId, payload.sub)
-      wsService.connect(authData.access_token, devId)
+      wsService.connect(authData.access_token, devId, username)
 
       // Listen for incoming messages via WebSocket
       setupMessageHandler()
