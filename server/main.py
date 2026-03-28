@@ -15,6 +15,7 @@ Security: Server never sees plaintext messages (true E2EE).
 """
 
 import json
+import os
 from uuid import UUID
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,6 +40,14 @@ from crud import (
 from ws import presence
 
 app = FastAPI(title="Secure IM Server (Signal-style infra)")
+
+
+def _get_admin_user_ids() -> set[str]:
+    """
+    Parse ADMIN_USER_IDS env var (comma-separated UUID strings).
+    """
+    raw = os.getenv("ADMIN_USER_IDS", "")
+    return {item.strip() for item in raw.split(",") if item.strip()}
 
 # ---- CORS ----
 app.add_middleware(
@@ -125,6 +134,11 @@ async def delete_user(
     from models import Message
     from sqlalchemy import delete as sql_delete
 
+    # Authorization: user may delete only their own account unless they are admin.
+    admin_user_ids = _get_admin_user_ids()
+    if caller_id != str(user_id) and caller_id not in admin_user_ids:
+        raise HTTPException(403, "Not authorized to delete this user")
+
     # Get all device IDs for this user
     result = await session.execute(select(Device).where(Device.user_id == user_id))
     devices = result.scalars().all()
@@ -155,6 +169,12 @@ async def admin_reset(
     """Delete all users, devices, keys, and messages from the database"""
     from models import Message
     from sqlalchemy import delete as sql_delete
+
+    # Authorization: only explicitly configured admins can reset all data.
+    admin_user_ids = _get_admin_user_ids()
+    if caller_id not in admin_user_ids:
+        raise HTTPException(403, "Admin privileges required")
+
     await session.execute(sql_delete(Message))
     await session.execute(sql_delete(OneTimePreKey))
     await session.execute(sql_delete(SignedPreKey))
