@@ -1,8 +1,8 @@
 // WebSocket service for real-time messaging with E2EE
 import { signalProtocol } from '../e2ee/signal-protocol'
 
-const WS_URL = 'ws://localhost:8000/ws'
-const API_URL = 'http://localhost:8000'
+const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
+const API_URL = ''
 
 class WebSocketService {
   constructor() {

@@ -2,7 +2,7 @@
  * API service for HTTP calls to the E2EE messaging server.
  * Handles authentication, device management, key exchange, and user operations.
  */
-const API_URL = 'http://localhost:8000'
+const API_URL = ''
 
 export const api = {
   /**
